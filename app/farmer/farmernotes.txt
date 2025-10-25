@@ -1,0 +1,453 @@
+// app/farmer/index.js
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
+import { router } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
+
+export default function HomeFarmer() {
+  const [user, setUser] = useState(null);
+  const [lastData, setLastData] = useState(null);
+  const [isConnected, setIsConnected] = useState(true);
+  const [recentActions, setRecentActions] = useState([]);
+  const [pendingSync, setPendingSync] = useState(0);
+  const [alerts, setAlerts] = useState([]);
+
+  useEffect(() => {
+    loadUserData();
+    checkConnection();
+    loadLocalData();
+    loadAlerts();
+    const netInfoSubscription = NetInfo.addEventListener(handleConnectivityChange);
+    
+    return () => netInfoSubscription();
+  }, []);
+
+  const handleConnectivityChange = (state) => {
+    setIsConnected(state.isConnected);
+    if (state.isConnected) {
+      syncPendingData();
+    }
+  };
+
+  const loadUserData = async () => {
+    const userString = await AsyncStorage.getItem('user');
+    if (userString) {
+      setUser(JSON.parse(userString));
+    }
+  };
+
+  const checkConnection = async () => {
+    const state = await NetInfo.fetch();
+    setIsConnected(state.isConnected);
+  };
+
+  const loadLocalData = async () => {
+    try {
+      // Load last sensor data
+      const lastDataLocal = await AsyncStorage.getItem('lastSensorData');
+      if (lastDataLocal) {
+        setLastData(JSON.parse(lastDataLocal));
+      }
+
+      // Load recent actions
+      const actionsLocal = await AsyncStorage.getItem('agriculturalActions');
+      if (actionsLocal) {
+        const actions = JSON.parse(actionsLocal);
+        setRecentActions(actions.slice(0, 3));
+        
+        // Count pending sync
+        const pending = actions.filter(action => !action.synced).length;
+        setPendingSync(pending);
+      }
+    } catch (error) {
+      console.log('Error loading local data:', error);
+    }
+  };
+
+  const loadAlerts = async () => {
+    try {
+      const alertsLocal = await AsyncStorage.getItem('farmerAlerts');
+      if (alertsLocal) {
+        setAlerts(JSON.parse(alertsLocal));
+      }
+    } catch (error) {
+      console.log('Error loading alerts:', error);
+    }
+  };
+
+  const syncPendingData = async () => {
+    // Implementar sincronización con MongoDB
+    console.log('Syncing pending data...');
+    // Aquí iría la lógica para enviar datos pendientes al servidor
+  };
+
+  const getMoistureStatus = (moisture) => {
+    if (!moisture) return { text: 'No data', color: '#666', icon: '❓' };
+    if (moisture < 30) return { text: 'Needs watering', color: '#f44336', icon: '⚠️' };
+    if (moisture < 60) return { text: 'Optimal', color: '#4caf50', icon: '✅' };
+    return { text: 'Soil moist', color: '#2196f3', icon: '💧' };
+  };
+
+  const status = getMoistureStatus(lastData?.moisture);
+
+  return (
+    <ScrollView style={styles.container}>
+      {/* Header with Connection Status */}
+      <View style={styles.header}>
+        <Text style={styles.title}>👨‍🌾 Farmer Dashboard</Text>
+        <Text style={styles.subtitle}>
+          {user ? `Welcome, ${user.name}` : 'Welcome farmer'}
+        </Text>
+        <View style={[styles.connectionBadge, { backgroundColor: isConnected ? '#4caf50' : '#ff9800' }]}>
+          <Text style={styles.connectionText}>
+            {isConnected ? 'Online ✅' : 'Offline mode 💾'}
+          </Text>
+        </View>
+      </View>
+
+      {/* Alertas del Técnico */}
+      {alerts.length > 0 && (
+        <TouchableOpacity 
+          style={styles.alertBanner}
+          onPress={() => router.push('/farmer/alerts')}
+        >
+          <Text style={styles.alertIcon}>🔔</Text>
+          <View style={styles.alertContent}>
+            <Text style={styles.alertTitle}>New Recommendations</Text>
+            <Text style={styles.alertText}>{alerts.length} new message(s)</Text>
+          </View>
+          <Text style={styles.alertArrow}>›</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Soil Status Card */}
+      <View style={styles.statusCard}>
+        <Text style={styles.cardTitle}>🌱 Soil Status</Text>
+        
+        <View style={styles.statusRow}>
+          <View style={styles.statusItem}>
+            <Text style={styles.statusLabel}>Soil Moisture</Text>
+            <Text style={[styles.statusValue, { color: status.color }]}>
+              {lastData ? `${lastData.moisture}%` : '--%'}
+            </Text>
+            <Text style={[styles.statusText, { color: status.color }]}>
+              {status.icon} {status.text}
+            </Text>
+          </View>
+          
+          <View style={styles.statusItem}>
+            <Text style={styles.statusLabel}>Temperature</Text>
+            <Text style={styles.statusValue}>
+              {lastData ? `${lastData.temperature}°C` : '--°C'}
+            </Text>
+            <Text style={styles.statusText}>🌡️ Ambient</Text>
+          </View>
+        </View>
+
+        <Text style={styles.lastUpdate}>
+          {lastData 
+            ? `Last reading: ${new Date(lastData.date).toLocaleDateString()}`
+            : 'No recent data'
+          }
+        </Text>
+      </View>
+
+      {/* Main Menu */}
+      <View style={styles.menuSection}>
+        <TouchableOpacity 
+          style={styles.menuButton}
+          onPress={() => router.push('/farmer/sensor-connection')}
+        >
+          <Text style={styles.menuIcon}>📡</Text>
+          <View style={styles.menuTextContainer}>
+            <Text style={styles.menuText}>Connect Sensor</Text>
+            <Text style={styles.menuSubtext}>Arduino Bluetooth</Text>
+          </View>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.menuButton}
+          onPress={() => router.push('/farmer/action-register')}
+        >
+          <Text style={styles.menuIcon}>📝</Text>
+          <View style={styles.menuTextContainer}>
+            <Text style={styles.menuText}>Register Action</Text>
+            <Text style={styles.menuSubtext}>Sowing, watering, fertilization</Text>
+          </View>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.menuButton}
+          onPress={() => router.push('/farmer/history')}
+        >
+          <Text style={styles.menuIcon}>📊</Text>
+          <View style={styles.menuTextContainer}>
+            <Text style={styles.menuText}>Complete History</Text>
+            <Text style={styles.menuSubtext}>Data and actions</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.menuButton}
+          onPress={() => router.push('/farmer/offline-data')}
+        >
+          <Text style={styles.menuIcon}>💾</Text>
+          <View style={styles.menuTextContainer}>
+            <Text style={styles.menuText}>Offline Data</Text>
+            <Text style={styles.menuSubtext}>
+              {pendingSync > 0 ? `${pendingSync} pending sync` : 'All synced'}
+            </Text>
+          </View>
+          {pendingSync > 0 && <View style={styles.pendingDot}></View>}
+        </TouchableOpacity>
+      </View>
+
+      {/* Recent Actions */}
+      <View style={styles.recentActions}>
+        <Text style={styles.sectionTitle}>Recent Actions</Text>
+        {recentActions.length > 0 ? (
+          recentActions.map((action, index) => (
+            <View key={index} style={styles.actionItem}>
+              <Text style={styles.actionIcon}>
+                {action.type === 'sowing' ? '🌱' : 
+                 action.type === 'watering' ? '💧' : 
+                 action.type === 'fertilization' ? '🧪' : '📝'}
+              </Text>
+              <View style={styles.actionDetails}>
+                <Text style={styles.actionTitle}>
+                  {action.type.charAt(0).toUpperCase() + action.type.slice(1)}
+                </Text>
+                <Text style={styles.actionDate}>
+                  {new Date(action.date).toLocaleDateString()}
+                </Text>
+                {action.seed && <Text style={styles.actionSeed}>Seed: {action.seed}</Text>}
+              </View>
+              {action.synced ? (
+                <Text style={styles.syncStatus}>✅</Text>
+              ) : (
+                <Text style={styles.syncStatus}>💾</Text>
+              )}
+            </View>
+          ))
+        ) : (
+          <Text style={styles.noActionsText}>No actions registered</Text>
+        )}
+      </View>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  header: {
+    backgroundColor: '#2e7d32',
+    padding: 20,
+    paddingTop: 50,
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: 'white',
+    textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 16,
+    color: 'white',
+    textAlign: 'center',
+    marginTop: 5,
+    opacity: 0.9,
+  },
+  connectionBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 15,
+    marginTop: 10,
+  },
+  connectionText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  alertBanner: {
+    backgroundColor: '#fff3cd',
+    margin: 16,
+    padding: 15,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderLeftWidth: 4,
+    borderLeftColor: '#ffc107',
+  },
+  alertIcon: {
+    fontSize: 20,
+    marginRight: 10,
+  },
+  alertContent: {
+    flex: 1,
+  },
+  alertTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#856404',
+  },
+  alertText: {
+    fontSize: 12,
+    color: '#856404',
+    marginTop: 2,
+  },
+  alertArrow: {
+    fontSize: 20,
+    color: '#856404',
+    fontWeight: 'bold',
+  },
+  statusCard: {
+    backgroundColor: 'white',
+    margin: 16,
+    padding: 20,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 15,
+    color: '#333',
+  },
+  statusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  statusItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statusLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 5,
+  },
+  statusValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  lastUpdate: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 15,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  menuSection: {
+    padding: 16,
+  },
+  menuButton: {
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    position: 'relative',
+  },
+  menuIcon: {
+    fontSize: 28,
+    marginRight: 15,
+  },
+  menuTextContainer: {
+    flex: 1,
+  },
+  menuText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  menuSubtext: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  pendingDot: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 8,
+    height: 8,
+    backgroundColor: '#ff9800',
+    borderRadius: 4,
+  },
+  recentActions: {
+    backgroundColor: 'white',
+    margin: 16,
+    padding: 20,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 15,
+    color: '#333',
+  },
+  actionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  actionIcon: {
+    fontSize: 20,
+    marginRight: 12,
+  },
+  actionDetails: {
+    flex: 1,
+  },
+  actionTitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+  },
+  actionDate: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  actionSeed: {
+    fontSize: 11,
+    color: '#888',
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
+  syncStatus: {
+    fontSize: 16,
+  },
+  noActionsText: {
+    textAlign: 'center',
+    color: '#666',
+    fontStyle: 'italic',
+    paddingVertical: 20,
+  },
+});
