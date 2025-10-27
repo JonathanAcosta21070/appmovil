@@ -15,7 +15,10 @@ export default function RootLayout() {
       <Stack.Screen name="farmer/history" options={{ title: 'Historial' }} />
 
       {/* scientist */}
-      <Stack.Screen name="scientist/home-scientist" options={{ title: 'Panel Científico', headerBackVisible: false }} />
+      <Stack.Screen name="scientist/home-scientist" options={{ title: 'Panel Tecnico', headerBackVisible: false }} />
+      <Stack.Screen name="scientist/farmer-details/[farmerId]" options={{ title: 'Detalles de agricultor'}} />
+      <Stack.Screen name="scientist/recommendations" options={{ title: 'Recomendaciones'}} />
+      <Stack.Screen name="scientist/reports" options={{ title: 'Resportes' }} />
       
     </Stack>
     </SyncProvider>

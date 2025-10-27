@@ -1,4 +1,4 @@
-// app/farmer/home-farmer.js - VERSIÓN CON ESPACIO AL FINAL
+// app/farmer/home-farmer.js - VERSIÓN SIN BOTÓN DE SINCRONIZACIÓN
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
@@ -16,7 +16,6 @@ export default function HomeFarmer() {
     isSyncing, 
     unsyncedCount, 
     user, 
-    syncLocalDataToCloud,
     API_BASE_URL
   } = useSync();
 
@@ -98,24 +97,6 @@ export default function HomeFarmer() {
     }
   };
 
-  // 🔹 Función para forzar sincronización
-  const handleForceSync = async () => {
-    setIsLoading(true);
-    try {
-      const success = await syncLocalDataToCloud();
-      if (success) {
-        await loadDataFromMongoDB();
-        Alert.alert('✅ Éxito', 'Datos sincronizados correctamente');
-      } else {
-        Alert.alert('ℹ️ Información', 'No hay datos pendientes por sincronizar');
-      }
-    } catch (error) {
-      Alert.alert('❌ Error', 'Error al sincronizar datos');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   // 🔹 Función para cerrar sesión
   const handleLogout = async () => {
     Alert.alert(
@@ -173,8 +154,7 @@ export default function HomeFarmer() {
         <View style={styles.statusContainer}>
           <View style={[styles.connectionBadge, { backgroundColor: isConnected ? '#4caf50' : '#ff9800' }]}>
             <Text style={styles.connectionText}>
-              {isConnected ? 'En línea ✅' : 'Sin conexión ❌'}
-              {isSyncing && ' 🔄'}
+
             </Text>
           </View>
           
@@ -188,31 +168,20 @@ export default function HomeFarmer() {
         </View>
       </View>
 
-      {/* Botón de sincronización */}
-      <View style={styles.syncSection}>
-        <TouchableOpacity 
-          style={[
-            styles.syncButton, 
-            unsyncedCount > 0 && styles.syncNeededButton,
-            (isLoading || isSyncing) && styles.syncButtonDisabled
-          ]}
-          onPress={handleForceSync}
-          disabled={isLoading || isSyncing}
-        >
-          <Text style={styles.syncButtonIcon}>
-            {isSyncing ? '🔄' : unsyncedCount > 0 ? '📱' : '☁️'}
-          </Text>
-          <View style={styles.syncButtonTextContainer}>
-            <Text style={styles.syncButtonText}>
-              {isSyncing ? 'Sincronizando...' : 
-               isLoading ? 'Cargando...' :
-               unsyncedCount > 0 ? `Sincronizar (${unsyncedCount})` : 'Sincronizar datos'}
-            </Text>
-            <Text style={styles.syncButtonSubtext}>
-              {unsyncedCount > 0 ? `${unsyncedCount} acciones pendientes` : 'Todos los datos actualizados'}
-            </Text>
+      {/* Información de estado */}
+      <View style={styles.infoSection}>
+        <View style={styles.infoCard}>
+          <Text style={styles.infoTitle}>📊 Estado del Sistema</Text>
+          <View style={styles.infoContent}>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Conexión:</Text>
+              <Text style={[styles.infoValue, { color: isConnected ? '#4caf50' : '#ff9800' }]}>
+                {isConnected ? 'En línea' : 'Sin conexión'}
+              </Text>
+            </View>
+    
           </View>
-        </TouchableOpacity>
+        </View>
       </View>
 
       {/* Tarjeta de Estado del Suelo */}
@@ -288,6 +257,18 @@ export default function HomeFarmer() {
         </TouchableOpacity>
       </View>
 
+      {/* Información adicional */}
+      <View style={styles.helpSection}>
+        <Text style={styles.helpTitle}>💡 Información sobre la app</Text>
+        <Text style={styles.helpText}>
+          • Los datos se sincronizan automaticamente al tener wifi{'\n'}
+          • Las acciones offline se guardan localmente{'\n'}
+          • Los datos locales se deben sincronizar de manera manual{'\n'}
+          • Los datos web aparecen automáticamente al tener wifi{'\n'}
+          • El punto naranja indica sin conexión
+        </Text>
+      </View>
+
       {/* 🔽 ESPACIO EN BLANCO PARA SCROLL ADICIONAL */}
       <View style={styles.bottomSpace} />
       
@@ -358,44 +339,40 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 12,
   },
-  syncSection: {
+  infoSection: {
     padding: 16,
   },
-  syncButton: {
-    backgroundColor: '#2196f3',
+  infoCard: {
+    backgroundColor: 'white',
     padding: 16,
     borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  syncNeededButton: {
-    backgroundColor: '#ff9800',
-  },
-  syncButtonDisabled: {
-    backgroundColor: '#b0bec5',
-  },
-  syncButtonIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  syncButtonTextContainer: {
-    flex: 1,
-  },
-  syncButtonText: {
+  infoTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: 'white',
+    color: '#333',
+    marginBottom: 12,
   },
-  syncButtonSubtext: {
-    fontSize: 12,
-    color: 'white',
-    opacity: 0.9,
-    marginTop: 2,
+  infoContent: {
+    gap: 8,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  infoLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  infoValue: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   statusCard: {
     backgroundColor: 'white',
@@ -497,9 +474,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#ff9800',
     borderRadius: 4,
   },
-  // 🔽 NUEVO: Espacio en blanco para scroll adicional
+  helpSection: {
+    padding: 16,
+    marginTop: 8,
+  },
+  helpTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  helpText: {
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 18,
+  },
   bottomSpace: {
-    height: 80, // Espacio adicional para scroll
+    height: 80,
   },
   logoutText: { 
     color: 'white', 

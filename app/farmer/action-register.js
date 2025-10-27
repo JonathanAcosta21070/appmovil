@@ -1,5 +1,5 @@
-// app/farmer/action-register.js - VERSIÓN LIMPIA
-import React, { useState, useEffect } from 'react';
+// app/farmer/action-register.js - VERSIÓN COMPLETA CON SINCRONIZACIÓN MANUAL
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Alert } from 'react-native';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -23,39 +23,41 @@ export default function ActionRegister() {
     isConnected, 
     isSyncing, 
     user,
-    API_BASE_URL
+    API_BASE_URL,
+    saveCropLocal,
+    pendingSyncCount
   } = useSync();
 
   // 🔄 GUARDADO LOCAL MEJORADO
-  const saveCropLocal = async (cropData) => {
+  const saveCropLocalEnhanced = async (cropData) => {
     try {
       const cropToSave = {
         ...cropData,
-        id: Date.now().toString(),
+        id: `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         synced: false,
         createdAt: new Date().toISOString(),
+        userId: user?.id,
+        _source: 'local',
         history: [{
+          _id: `action-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           date: new Date().toISOString(),
           type: cropData.actionType,
           seed: cropData.seed || '',
           action: generateActionDescription(cropData.actionType, cropData.seed, cropData.bioFertilizer),
           bioFertilizer: cropData.bioFertilizer || '',
           observations: cropData.observations || '',
-          synced: false
+          synced: false,
+          _source: 'local'
         }]
       };
 
-      const existingCrops = await AsyncStorage.getItem('localCrops') || '[]';
-      const crops = JSON.parse(existingCrops);
-      crops.push(cropToSave);
-      await AsyncStorage.setItem('localCrops', JSON.stringify(crops));
+      const savedCrop = await saveCropLocal(cropToSave);
+      console.log('✅ Cultivo guardado localmente, ID:', savedCrop.id);
       
-      console.log('✅ Cultivo guardado localmente, ID:', cropToSave.id);
-      
-      return cropToSave;
+      return savedCrop;
     } catch (error) {
       console.log('❌ Error guardando localmente:', error);
-      return null;
+      throw error;
     }
   };
 
@@ -77,7 +79,7 @@ export default function ActionRegister() {
     }
   };
 
-  // 🔄 GUARDAR CULTIVO/ACCIÓN
+  // 🔄 GUARDAR CULTIVO/ACCIÓN (CON SINCRONIZACIÓN MANUAL)
   const handleSave = async () => {
     // Validaciones
     if (!form.crop || !form.location) {
@@ -94,15 +96,25 @@ export default function ActionRegister() {
 
     const cropData = {
       userId: user.id,
-      ...form,
-      humidity: form.humidity ? parseInt(form.humidity) : null
+      crop: form.crop,
+      location: form.location,
+      actionType: form.actionType,
+      seed: form.seed,
+      bioFertilizer: form.bioFertilizer,
+      observations: form.observations,
+      recommendations: form.recommendations,
+      humidity: form.humidity ? parseInt(form.humidity) : null,
+      status: 'Activo',
+      sowingDate: new Date().toISOString()
     };
 
     console.log('💾 Intentando guardar cultivo/acción...');
+    console.log('📶 Estado conexión:', isConnected ? 'Conectado' : 'Desconectado');
 
     if (isConnected && !isSyncing) {
-      // 🔄 MODO ONLINE: Intentar guardar en MongoDB primero
+      // 🔄 MODO ONLINE: Intentar guardar en servidor primero
       try {
+        console.log('🌐 Enviando datos al servidor...');
         const response = await fetch(`${API_BASE_URL}/crops`, {
           method: 'POST',
           headers: {
@@ -115,20 +127,22 @@ export default function ActionRegister() {
         if (response.ok) {
           const result = await response.json();
           Alert.alert('✅ Éxito', 'Acción registrada correctamente en la nube');
-          console.log('🌱 Cultivo/acción guardado en MongoDB:', result);
+          console.log('🌱 Cultivo/acción guardado en servidor:', result);
           
           resetForm();
           setTimeout(() => router.back(), 1500);
         } else {
-          throw new Error('Error en respuesta del servidor');
+          const errorText = await response.text();
+          throw new Error(`Error del servidor: ${response.status} - ${errorText}`);
         }
       } catch (error) {
-        console.log('❌ Error guardando en MongoDB, guardando localmente:', error);
+        console.log('❌ Error guardando en servidor, guardando localmente:', error);
         // Fallback: guardar localmente
         await saveAndHandleOffline(cropData);
       }
     } else {
       // 📴 MODO OFFLINE: Guardar localmente directamente
+      console.log('📴 Modo offline - guardando localmente');
       await saveAndHandleOffline(cropData);
     }
 
@@ -137,16 +151,39 @@ export default function ActionRegister() {
 
   // 🔄 FUNCIÓN PARA GUARDADO OFFLINE
   const saveAndHandleOffline = async (cropData) => {
-    const saved = await saveCropLocal(cropData);
-    if (saved) {
-      Alert.alert(
-        '💾 Guardado Local', 
-        'Acción guardada localmente. Se sincronizará automáticamente cuando haya conexión.',
-        [{ text: 'OK', onPress: () => resetForm() }]
-      );
-      setTimeout(() => router.back(), 1500);
-    } else {
-      Alert.alert('❌ Error', 'No se pudo guardar la acción');
+    try {
+      const saved = await saveCropLocalEnhanced(cropData);
+      if (saved) {
+        Alert.alert(
+          '💾 Guardado Local', 
+          `Acción guardada localmente. ${
+            !isConnected 
+              ? 'Puedes sincronizarla desde el inicio cuando tengas conexión.' 
+              : 'No se pudo enviar al servidor, pero se guardó localmente.'
+          }`,
+          [
+            { 
+              text: 'OK', 
+              onPress: () => {
+                resetForm();
+                setTimeout(() => router.back(), 1000);
+              }
+            },
+            {
+              text: 'Ir al Inicio',
+              onPress: () => {
+                resetForm();
+                router.replace('/farmer/home-farmer');
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert('❌ Error', 'No se pudo guardar la acción');
+      }
+    } catch (error) {
+      console.log('❌ Error en guardado offline:', error);
+      Alert.alert('❌ Error', 'No se pudo guardar la acción localmente');
     }
   };
 
@@ -165,7 +202,42 @@ export default function ActionRegister() {
 
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.title}>🌱 Registrar Nueva Acción</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>🌱 Registrar Nueva Acción</Text>
+        
+        {/* Indicador de estado */}
+        <View style={styles.statusContainer}>
+          <View style={[styles.statusDot, 
+            isConnected ? styles.statusOnline : styles.statusOffline
+          ]} />
+          <Text style={styles.statusText}>
+            {isConnected ? 'En línea' : 'Sin conexión'}
+          </Text>
+        </View>
+      </View>
+
+      {/* Información de sincronización */}
+      <View style={styles.syncInfoContainer}>
+        {!isConnected ? (
+          <View style={styles.syncWarning}>
+            <Text style={styles.syncWarningText}>
+              📴 Modo offline - Esta acción se guardará localmente
+            </Text>
+            <Text style={styles.syncWarningSubtext}>
+              Sincroniza desde el inicio cuando tengas conexión
+            </Text>
+          </View>
+        ) : pendingSyncCount > 0 ? (
+          <View style={styles.pendingSync}>
+            <Text style={styles.pendingSyncText}>
+              ⚡ Tienes {pendingSyncCount} acción(es) pendientes de sincronizar
+            </Text>
+            <Text style={styles.pendingSyncSubtext}>
+              Usa el botón "Sincronizar" en el inicio para enviarlas al servidor
+            </Text>
+          </View>
+        ) : null}
+      </View>
 
       {/* Formulario principal */}
       <View style={styles.section}>
@@ -238,8 +310,9 @@ export default function ActionRegister() {
           style={styles.input}
           placeholder="Ej: 65"
           value={form.humidity}
-          onChangeText={(text) => setForm({ ...form, humidity: text })}
+          onChangeText={(text) => setForm({ ...form, humidity: text.replace(/[^0-9]/g, '') })}
           keyboardType="numeric"
+          maxLength={3}
         />
       </View>
 
@@ -252,6 +325,7 @@ export default function ActionRegister() {
           onChangeText={(text) => setForm({ ...form, observations: text })}
           multiline
           numberOfLines={3}
+          textAlignVertical="top"
         />
       </View>
 
@@ -264,6 +338,7 @@ export default function ActionRegister() {
           onChangeText={(text) => setForm({ ...form, recommendations: text })}
           multiline
           numberOfLines={2}
+          textAlignVertical="top"
         />
       </View>
 
@@ -273,9 +348,21 @@ export default function ActionRegister() {
         disabled={isLoading}
       >
         <Text style={styles.saveButtonText}>
-          {isLoading ? '⏳ Guardando...' : '💾 Guardar Acción'}
+          {isLoading ? '⏳ Guardando...' : 
+           isConnected ? '💾 Guardar Acción' : '💾 Guardar Localmente'}
         </Text>
       </TouchableOpacity>
+
+      {/* Información adicional */}
+      <View style={styles.infoCard}>
+        <Text style={styles.infoTitle}>💡 Información Importante</Text>
+        <Text style={styles.infoText}>
+          • Los datos se guardan localmente cuando no hay internet{'\n'}
+          • Puedes sincronizar manualmente desde el inicio{'\n'}
+          • Los campos marcados con * son obligatorios{'\n'}
+          • Los datos web aparecerán automáticamente
+        </Text>
+      </View>
 
       <View style={{ height: 50 }} />
     </ScrollView>
@@ -288,18 +375,94 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5', 
     padding: 16 
   },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
   title: { 
     fontSize: 24, 
     fontWeight: 'bold', 
-    textAlign: 'center', 
-    marginBottom: 20, 
-    color: '#2e7d32' 
+    color: '#2e7d32',
+    flex: 1,
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  statusOnline: {
+    backgroundColor: '#4caf50',
+  },
+  statusOffline: {
+    backgroundColor: '#ff9800',
+  },
+  statusText: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+  },
+  syncInfoContainer: {
+    marginBottom: 16,
+  },
+  syncWarning: {
+    backgroundColor: '#fff3cd',
+    padding: 12,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#ffc107',
+  },
+  syncWarningText: {
+    color: '#856404',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  syncWarningSubtext: {
+    color: '#856404',
+    fontSize: 12,
+    opacity: 0.8,
+  },
+  pendingSync: {
+    backgroundColor: '#d1ecf1',
+    padding: 12,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#0dcaf0',
+  },
+  pendingSyncText: {
+    color: '#055160',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  pendingSyncSubtext: {
+    color: '#055160',
+    fontSize: 12,
+    opacity: 0.8,
   },
   section: { 
     backgroundColor: 'white', 
     padding: 16, 
     borderRadius: 12, 
-    marginBottom: 16 
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   label: { 
     fontSize: 16, 
@@ -316,9 +479,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, 
     paddingVertical: 8, 
     borderRadius: 20, 
-    backgroundColor: '#f0f0f0', 
+    backgroundColor: '#f8f9fa', 
     borderWidth: 1, 
-    borderColor: '#ddd' 
+    borderColor: '#dee2e6' 
   },
   typeButtonSelected: { 
     backgroundColor: '#2e7d32', 
@@ -326,7 +489,8 @@ const styles = StyleSheet.create({
   },
   typeText: { 
     fontSize: 12, 
-    color: '#666' 
+    color: '#6c757d',
+    fontWeight: '500',
   },
   typeTextSelected: { 
     color: 'white', 
@@ -337,17 +501,23 @@ const styles = StyleSheet.create({
     borderColor: '#ddd', 
     borderRadius: 8, 
     padding: 12, 
-    fontSize: 16 
+    fontSize: 16,
+    backgroundColor: '#fafafa',
   },
   textArea: { 
-    height: 80, 
+    height: 100, 
     textAlignVertical: 'top' 
   },
   saveButton: { 
     backgroundColor: '#2e7d32', 
     padding: 16, 
     borderRadius: 12, 
-    marginTop: 20 
+    marginTop: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   saveButtonDisabled: { 
     backgroundColor: '#cccccc' 
@@ -357,5 +527,24 @@ const styles = StyleSheet.create({
     textAlign: 'center', 
     fontSize: 18, 
     fontWeight: 'bold' 
+  },
+  infoCard: {
+    backgroundColor: '#e3f2fd',
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196f3',
+  },
+  infoTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1976d2',
+    marginBottom: 8,
+  },
+  infoText: {
+    fontSize: 12,
+    color: '#1565c0',
+    lineHeight: 18,
   },
 });

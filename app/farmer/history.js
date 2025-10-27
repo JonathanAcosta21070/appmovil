@@ -1,4 +1,4 @@
-// app/farmer/history.js - VERSIÓN LIMPIA
+// app/farmer/history.js - VERSIÓN COMPLETA CON OFFLINE
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, RefreshControl } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
@@ -17,7 +17,11 @@ export default function History() {
   const { 
     user, 
     getUserCrops,
-    API_BASE_URL
+    API_BASE_URL,
+    isConnected,
+    pendingSyncCount,
+    syncPendingData,
+    deleteLocalCrop
   } = useSync();
 
   useFocusEffect(
@@ -51,13 +55,14 @@ export default function History() {
       setLoading(true);
       
       console.log('🔄 Cargando datos para usuario:', user?.email);
+      console.log('📶 Estado conexión:', isConnected ? 'Conectado' : 'Desconectado');
       
       let allCrops = [];
       
       if (user && user.id) {
         try {          
           allCrops = await getUserCrops();
-          console.log('🌱 Datos cargados (app + web):', allCrops.length);
+          console.log('🌱 Datos cargados (app + web + locales):', allCrops.length);
           
         } catch (error) {
           console.log('❌ Error cargando cultivos:', error);
@@ -93,7 +98,8 @@ export default function History() {
     
     crops.forEach(crop => {
       const cropId = crop._id || crop.id;
-      const isLegacy = crop.isLegacy || false;
+      const isWebProject = crop.isWebProject || false;
+      const isLocal = crop._source === 'local' || crop.synced === false;
       const cropName = crop.crop || 'Cultivo no especificado';
       const location = crop.location || 'Ubicación no especificada';
       
@@ -108,10 +114,12 @@ export default function History() {
             cropId: cropId,
             cropName: cropName,
             location: location,
-            _source: crop.synced === false ? 'local' : 'cloud',
-            synced: crop.synced !== false,
-            isLegacy: isLegacy,
+            _source: isLocal ? 'local' : (isWebProject ? 'web' : 'cloud'),
+            synced: crop.synced !== false && action.synced !== false,
+            isLegacy: crop.isLegacy || false,
             isWebAction: action.isWebAction || false,
+            isWebProject: isWebProject,
+            isLocal: isLocal,
             cropData: {
               crop: cropName,
               location: location,
@@ -120,8 +128,10 @@ export default function History() {
               bioFertilizer: crop.bioFertilizer,
               observations: crop.observations,
               recommendations: crop.recommendations,
-              isLegacy: isLegacy,
-              isWebAction: action.isWebAction || false
+              isLegacy: crop.isLegacy || false,
+              isWebProject: isWebProject,
+              isWebAction: action.isWebAction || false,
+              isLocal: isLocal
             }
           });
         });
@@ -135,8 +145,8 @@ export default function History() {
 
   // 🗑️ FUNCIÓN PARA ELIMINAR ACCIÓN
   const handleDeleteAction = async (action) => {
-    // Verificar si es una acción de la web (legacy) - no se pueden eliminar
-    if (action.isWebAction || action.isLegacy) {
+    // Verificar si es una acción de la web - no se pueden eliminar
+    if (action.isWebAction || action.isLegacy || action.isWebProject) {
       Alert.alert(
         '⚠️ Acción no eliminable',
         'Las acciones de la web no se pueden eliminar desde la app móvil.'
@@ -145,7 +155,7 @@ export default function History() {
     }
 
     // Verificar si es una acción local no sincronizada
-    if (action._source === 'local') {
+    if (action._source === 'local' || action.isLocal) {
       Alert.alert(
         '🗑️ Eliminar acción local',
         '¿Estás seguro de que quieres eliminar esta acción local?',
@@ -176,7 +186,7 @@ export default function History() {
     );
   };
 
-  // 🗑️ ELIMINAR ACCIÓN DE LA NUBE - VERSIÓN CORREGIDA
+  // 🗑️ ELIMINAR ACCIÓN DE LA NUBE
   const deleteCloudAction = async (action) => {
     if (!action.cropId || !action._id) {
       console.log('❌ Faltan IDs para eliminar:', { 
@@ -205,13 +215,10 @@ export default function History() {
         const result = await response.json();
         console.log('✅ Eliminación exitosa:', result);
         
-        // 🔥 CORRECCIÓN: ACTUALIZAR ESTADO LOCAL INMEDIATAMENTE
+        // Actualizar estado local inmediatamente
         setActions(prevActions => 
           prevActions.filter(a => a._id !== action._id)
         );
-        
-        // 🔥 FORZAR ACTUALIZACIÓN DE LA LISTA
-        await loadActions();
         
         Alert.alert('✅ Éxito', 'Acción eliminada correctamente');
       } else {
@@ -232,44 +239,14 @@ export default function History() {
     try {
       console.log('🗑️ Eliminando acción local...');
       
-      // Cargar cultivos locales
-      const localCropsString = await AsyncStorage.getItem('localCrops') || '[]';
-      let localCrops = JSON.parse(localCropsString);
+      const success = await deleteLocalCrop(action.cropId);
       
-      console.log('📁 Cultivos locales antes:', localCrops.length);
-      
-      // Encontrar y actualizar el cultivo que contiene la acción
-      let actionDeleted = false;
-      const updatedCrops = localCrops.map(crop => {
-        if (crop.id === action.cropId && crop.history) {
-          console.log('🔍 Cultivo encontrado, historial antes:', crop.history.length);
-          
-          // Filtrar la acción a eliminar
-          const updatedHistory = crop.history.filter(
-            hist => hist._id !== action._id && hist.id !== action._id
-          );
-          
-          if (updatedHistory.length < crop.history.length) {
-            actionDeleted = true;
-            console.log('✅ Acción local eliminada');
-            return { ...crop, history: updatedHistory };
-          }
-        }
-        return crop;
-      });
-
-      if (actionDeleted) {
-        // Guardar cultivos actualizados
-        await AsyncStorage.setItem('localCrops', JSON.stringify(updatedCrops));
-        console.log('💾 Cultivos locales guardados después de eliminar');
-        
+      if (success) {
         // Recargar acciones
         await loadActions();
-        
         Alert.alert('✅ Éxito', 'Acción local eliminada correctamente');
       } else {
-        console.log('❌ No se encontró la acción para eliminar');
-        Alert.alert('Error', 'No se encontró la acción para eliminar');
+        Alert.alert('Error', 'No se pudo eliminar la acción local');
       }
     } catch (error) {
       console.error('❌ Error eliminando acción local:', error);
@@ -285,17 +262,17 @@ export default function History() {
       console.log('📁 Cultivos locales cargados:', localCrops.length);
 
       let mongoCrops = [];
-      if (user && user.id) {
+      if (user && user.id && isConnected) {
         try {
           const response = await fetch(`${API_BASE_URL}/crops`, {
             headers: { 'Authorization': user.id }
           });
           if (response.ok) {
             mongoCrops = await response.json();
-            console.log('☁️ Cultivos desde MongoDB cargados:', mongoCrops.length);
+            console.log('☁️ Cultivos desde servidor cargados:', mongoCrops.length);
           }
         } catch (error) {
-          console.log('❌ Error cargando cultivos de MongoDB:', error);
+          console.log('❌ Error cargando cultivos del servidor:', error);
         }
       }
 
@@ -303,6 +280,37 @@ export default function History() {
     } catch (error) {
       console.log('❌ Error cargando cultivos manualmente:', error);
       return [];
+    }
+  };
+
+  // 🔄 FUNCIÓN DE SINCRONIZACIÓN MANUAL CON WEB
+  const handleManualSync = async () => {
+    if (!isConnected) {
+      Alert.alert('Sin Conexión', 'No hay conexión a internet para sincronizar');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      console.log('🔄 Iniciando sincronización manual...');
+      const result = await syncPendingData();
+      
+      if (result.success) {
+        Alert.alert('✅ Éxito', 
+          result.synced > 0 
+            ? `Se sincronizaron ${result.synced} acción(es) correctamente`
+            : 'No había acciones pendientes por sincronizar'
+        );
+        // Recargar datos
+        await loadActions();
+      } else {
+        Alert.alert('❌ Error', 'No se pudieron sincronizar los datos pendientes');
+      }
+    } catch (error) {
+      console.error('❌ Error en sincronización manual:', error);
+      Alert.alert('❌ Error', 'No se pudo completar la sincronización');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -349,9 +357,12 @@ export default function History() {
       }
     })();
     
-    if (action.isWebAction) {
+    // 🔥 NUEVO: Identificar proyectos web
+    if (action.isWebProject) {
       return `${baseIcon} 🌐`;
-    } else if (action._source === 'local') {
+    } else if (action.isWebAction) {
+      return `${baseIcon} 🔗`;
+    } else if (action._source === 'local' || action.isLocal) {
       return `${baseIcon} 💾`;
     }
     
@@ -359,14 +370,16 @@ export default function History() {
   };
 
   const getStatusColor = (action) => {
-    if (action._source === 'local') return '#ff9800';
+    if (action.isWebProject) return '#2196f3';
     if (action.isWebAction) return '#2196f3';
+    if (action._source === 'local' || action.isLocal) return '#ff9800';
     return action.synced ? '#4caf50' : '#ff9800';
   };
 
   const getStatusText = (action) => {
-    if (action._source === 'local') return 'Pendiente de sincronizar';
+    if (action.isWebProject) return 'Proyecto Web';
     if (action.isWebAction) return 'Desde la Web';
+    if (action._source === 'local' || action.isLocal) return 'Pendiente de sincronizar';
     return action.synced ? 'Sincronizado' : 'Pendiente';
   };
 
@@ -406,8 +419,12 @@ export default function History() {
       }
     })();
     
-    if (action.isWebAction) {
+    if (action.isWebProject) {
+      return `${baseDescription} (Proyecto Web)`;
+    } else if (action.isWebAction) {
       return `${baseDescription} (Web)`;
+    } else if (action._source === 'local' || action.isLocal) {
+      return `${baseDescription} (Local)`;
     }
     
     return baseDescription;
@@ -419,6 +436,24 @@ export default function History() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       <Text style={styles.title}>📊 Historial de Acciones</Text>
+
+      {/* Información de sincronización */}
+      <View style={styles.syncSection}>
+        <View style={styles.connectionStatus}>
+          <View style={[styles.statusDot, isConnected ? styles.statusOnline : styles.statusOffline]} />
+          <Text style={styles.statusText}>
+            {isConnected ? 'Conectado' : 'Sin conexión'}
+          </Text>
+        </View>
+
+        {pendingSyncCount > 0 && (
+          <TouchableOpacity style={styles.syncButton} onPress={handleManualSync}>
+            <Text style={styles.syncButtonText}>
+              🔄 Sincronizar {pendingSyncCount} pendiente(s)
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
       {/* Filtros */}
       <View style={styles.filterSection}>
@@ -451,6 +486,10 @@ export default function History() {
         <View style={styles.statsContainer}>
           <Text style={styles.statsText}>
             📊 Mostrando {filteredActions.length} de {actions.length} acciones
+          </Text>
+          <Text style={styles.statsSubtext}>
+            {actions.filter(a => a.isWebProject || a.isWebAction).length} desde la web • 
+            {actions.filter(a => a._source === 'local' || a.isLocal).length} locales
           </Text>
         </View>
       </View>
@@ -491,8 +530,8 @@ export default function History() {
                       </Text>
                     </View>
                     
-                    {/* 🗑️ BOTÓN DE ELIMINAR */}
-                    {!action.isWebAction && !action.isLegacy && (
+                    {/* 🗑️ BOTÓN DE ELIMINAR - Solo para acciones de la app */}
+                    {!action.isWebAction && !action.isLegacy && !action.isWebProject && (
                       <TouchableOpacity
                         style={[styles.deleteButton, isDeleting && styles.deleteButtonDisabled]}
                         onPress={() => handleDeleteAction(action)}
@@ -579,6 +618,47 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     color: '#2e7d32',
   },
+  syncSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    backgroundColor: 'white',
+    padding: 12,
+    borderRadius: 12,
+  },
+  connectionStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
+  },
+  statusOnline: {
+    backgroundColor: '#4caf50',
+  },
+  statusOffline: {
+    backgroundColor: '#ff9800',
+  },
+  statusText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  syncButton: {
+    backgroundColor: '#2196f3',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  syncButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
   filterSection: {
     marginBottom: 20,
   },
@@ -622,6 +702,11 @@ const styles = StyleSheet.create({
   statsText: {
     fontSize: 12,
     color: '#666',
+    fontStyle: 'italic',
+  },
+  statsSubtext: {
+    fontSize: 11,
+    color: '#999',
     fontStyle: 'italic',
   },
   actionsList: {
