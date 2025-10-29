@@ -3,8 +3,10 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_BASE_URL } from '../config/api'; // 🔹 Importar desde configuración
-
+// POR ESTA:
+import API_CONFIG from '../config/api';
+// Y luego usa:
+const API_BASE_URL = API_CONFIG.API_BASE_URL;
 export default function RegistroScreen() {
   const [form, setForm] = useState({
     name: '',
@@ -29,7 +31,7 @@ export default function RegistroScreen() {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/registro`, {
+      const response = await fetch(`${API_BASE_URL}/auth/registro`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

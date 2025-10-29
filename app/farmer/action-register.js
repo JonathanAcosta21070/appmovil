@@ -115,7 +115,7 @@ export default function ActionRegister() {
       // 🔄 MODO ONLINE: Intentar guardar en servidor primero
       try {
         console.log('🌐 Enviando datos al servidor...');
-        const response = await fetch(`${API_BASE_URL}/crops`, {
+        const response = await fetch(`${API_BASE_URL}/farmer/crops`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

@@ -200,7 +200,7 @@ export default function History() {
     setDeletingActionId(action._id);
 
     try {
-      const url = `${API_BASE_URL}/crops/${action.cropId}/history/${action._id}`;
+      const url = `${API_BASE_URL}/farmer/crops/${action.cropId}/history/${action._id}`;
       console.log('🔍 URL de eliminación:', url);
       
       const response = await fetch(url, {

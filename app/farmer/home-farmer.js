@@ -74,7 +74,7 @@ export default function HomeFarmer() {
       console.log('👤 Cargando datos para usuario:', user.email);
 
       // ✅ Cargar datos del sensor
-      const sensorResponse = await fetch(`${API_BASE_URL}/sensor-data/latest`, {
+      const sensorResponse = await fetch(`${API_BASE_URL}/farmer/sensor-data/latest`, {
         headers: {
           'Authorization': user.id
         }
