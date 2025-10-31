@@ -1,9 +1,8 @@
 // config/api.js
 const API_CONFIG = {
   // 🔧 CAMBIA ESTA IP POR TU IP LOCAL
-  BASE_URL: 'https://appmovilbackend.onrender.com',
-API_BASE_URL: 'https://appmovilbackend.onrender.com/api',
-
+  BASE_URL: 'http://192.168.68.108:3000',
+  API_BASE_URL: 'http://192.168.68.108:3000/api',
   
   // Timeouts
   TIMEOUT: 10000, // 10 segundos

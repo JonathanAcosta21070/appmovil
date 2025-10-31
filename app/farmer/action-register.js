@@ -79,114 +79,201 @@ export default function ActionRegister() {
     }
   };
 
-  // 🔄 GUARDAR CULTIVO/ACCIÓN (CON SINCRONIZACIÓN MANUAL)
-  const handleSave = async () => {
-    // Validaciones
-    if (!form.crop || !form.location) {
-      Alert.alert('Error', 'Nombre del cultivo y ubicación son requeridos');
-      return;
-    }
+ // 🔄 GUARDAR CULTIVO/ACCIÓN (CON SINCRONIZACIÓN MANUAL)
+const handleSave = async () => {
+  // Validaciones
+  if (!form.crop || !form.location) {
+    Alert.alert('Error', 'Nombre del cultivo y ubicación son requeridos');
+    return;
+  }
 
-    if (!user) {
-      Alert.alert('Error', 'Usuario no identificado');
-      return;
-    }
+  if (!user) {
+    Alert.alert('Error', 'Usuario no identificado');
+    return;
+  }
 
-    setIsLoading(true);
+  setIsLoading(true);
 
-    const cropData = {
-      userId: user.id,
-      crop: form.crop,
-      location: form.location,
-      actionType: form.actionType,
-      seed: form.seed,
-      bioFertilizer: form.bioFertilizer,
-      observations: form.observations,
-      recommendations: form.recommendations,
-      humidity: form.humidity ? parseInt(form.humidity) : null,
-      status: 'Activo',
-      sowingDate: new Date().toISOString()
-    };
+  // 🎯 NORMALIZAR DATOS PARA EVITAR DUPLICADOS
+  const normalizedCrop = form.crop.trim();
+  const normalizedLocation = form.location.trim();
 
-    console.log('💾 Intentando guardar cultivo/acción...');
-    console.log('📶 Estado conexión:', isConnected ? 'Conectado' : 'Desconectado');
-
-    if (isConnected && !isSyncing) {
-      // 🔄 MODO ONLINE: Intentar guardar en servidor primero
-      try {
-        console.log('🌐 Enviando datos al servidor...');
-        const response = await fetch(`${API_BASE_URL}/farmer/crops`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': user.id
-          },
-          body: JSON.stringify(cropData)
-        });
-
-        if (response.ok) {
-          const result = await response.json();
-          Alert.alert('✅ Éxito', 'Acción registrada correctamente en la nube');
-          console.log('🌱 Cultivo/acción guardado en servidor:', result);
-          
-          resetForm();
-          setTimeout(() => router.back(), 1500);
-        } else {
-          const errorText = await response.text();
-          throw new Error(`Error del servidor: ${response.status} - ${errorText}`);
-        }
-      } catch (error) {
-        console.log('❌ Error guardando en servidor, guardando localmente:', error);
-        // Fallback: guardar localmente
-        await saveAndHandleOffline(cropData);
-      }
-    } else {
-      // 📴 MODO OFFLINE: Guardar localmente directamente
-      console.log('📴 Modo offline - guardando localmente');
-      await saveAndHandleOffline(cropData);
-    }
-
-    setIsLoading(false);
+  const cropData = {
+    crop: normalizedCrop,
+    location: normalizedLocation,
+    actionType: form.actionType,
+    seed: form.seed,
+    bioFertilizer: form.bioFertilizer,
+    observations: form.observations,
+    recommendations: form.recommendations,
+    humidity: form.humidity ? parseInt(form.humidity) : null,
+    status: 'Activo'
   };
 
-  // 🔄 FUNCIÓN PARA GUARDADO OFFLINE
-  const saveAndHandleOffline = async (cropData) => {
+  console.log('💾 Intentando guardar cultivo/acción...');
+  console.log('📶 Estado conexión:', isConnected ? 'Conectado' : 'Desconectado');
+
+  if (isConnected && !isSyncing) {
+    // 🔄 MODO ONLINE: Intentar guardar en servidor primero
     try {
-      const saved = await saveCropLocalEnhanced(cropData);
-      if (saved) {
-        Alert.alert(
-          '💾 Guardado Local', 
-          `Acción guardada localmente. ${
-            !isConnected 
-              ? 'Puedes sincronizarla desde el inicio cuando tengas conexión.' 
-              : 'No se pudo enviar al servidor, pero se guardó localmente.'
-          }`,
-          [
-            { 
-              text: 'OK', 
-              onPress: () => {
-                resetForm();
-                setTimeout(() => router.back(), 1000);
-              }
-            },
-            {
-              text: 'Ir al Inicio',
-              onPress: () => {
-                resetForm();
-                router.replace('/farmer/home-farmer');
-              }
-            }
-          ]
-        );
+      console.log('🌐 Enviando datos al servidor...');
+      const response = await fetch(`${API_BASE_URL}/farmer/crops`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': user.id
+        },
+        body: JSON.stringify(cropData)
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        
+        // 📊 MOSTRAR MENSAJE ESPECÍFICO SEGÚN EL TIPO DE OPERACIÓN
+        const message = result.tipo === 'accion_agregada' 
+          ? '✅ Acción agregada al cultivo existente'
+          : '🌱 Nuevo cultivo creado correctamente';
+        
+        Alert.alert('Éxito', message);
+        console.log('🌱 Resultado del servidor:', result);
+        
+        resetForm();
+        setTimeout(() => router.back(), 1500);
       } else {
-        Alert.alert('❌ Error', 'No se pudo guardar la acción');
+        const errorText = await response.text();
+        throw new Error(`Error del servidor: ${response.status} - ${errorText}`);
       }
     } catch (error) {
-      console.log('❌ Error en guardado offline:', error);
-      Alert.alert('❌ Error', 'No se pudo guardar la acción localmente');
+      console.log('❌ Error guardando en servidor, guardando localmente:', error);
+      // Fallback: guardar localmente
+      await saveAndHandleOffline(cropData);
     }
-  };
+  } else {
+    // 📴 MODO OFFLINE: Guardar localmente con lógica de agrupación
+    console.log('📴 Modo offline - guardando localmente');
+    await saveAndHandleOfflineWithGrouping(cropData);
+  }
 
+  setIsLoading(false);
+};
+// 🔄 FUNCIÓN AUXILIAR: Obtener cultivos locales
+const getLocalCrops = async () => {
+  try {
+    const localCropsString = await AsyncStorage.getItem('localCrops') || '[]';
+    const localCrops = JSON.parse(localCropsString);
+    
+    // Filtrar por usuario actual
+    const userCrops = user?.id 
+      ? localCrops.filter(crop => crop.userId === user.id)
+      : localCrops;
+    
+    return userCrops;
+  } catch (error) {
+    console.log('❌ Error obteniendo cultivos locales:', error);
+    return [];
+  }
+};
+// 🔄 GUARDADO OFFLINE CON AGRUPACIÓN - CORREGIDO
+const saveAndHandleOfflineWithGrouping = async (cropData) => {
+  try {
+    console.log('💾 Iniciando guardado offline con agrupación...');
+    
+    // Obtener cultivos locales existentes
+    const localCrops = await getLocalCrops();
+    console.log('📁 Cultivos locales encontrados:', localCrops.length);
+    
+    // Buscar cultivo existente con mismo nombre y ubicación
+    const existingCrop = localCrops.find(crop => {
+      const cropMatch = crop.crop?.toLowerCase().trim() === cropData.crop.toLowerCase().trim();
+      const locationMatch = crop.location?.toLowerCase().trim() === cropData.location.toLowerCase().trim();
+      const isActive = crop.status === 'Activo';
+      
+      console.log('🔍 Buscando cultivo existente:', {
+        buscando: { crop: cropData.crop, location: cropData.location },
+        encontrado: cropMatch && locationMatch && isActive
+      });
+      
+      return cropMatch && locationMatch && isActive;
+    });
+
+    let savedCrop;
+
+    if (existingCrop) {
+      // 🔄 AGREGAR ACCIÓN A CULTIVO EXISTENTE
+      console.log('🔄 Agregando acción a cultivo existente:', existingCrop.id);
+      
+      const newAction = {
+        _id: `action-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        date: new Date().toISOString(),
+        type: cropData.actionType,
+        seed: cropData.seed || '',
+        action: generateActionDescription(cropData.actionType, cropData.seed, cropData.bioFertilizer),
+        bioFertilizer: cropData.bioFertilizer || '',
+        observations: cropData.observations || '',
+        synced: false,
+        _source: 'local'
+      };
+
+      // Actualizar cultivo existente
+      const updatedCrop = {
+        ...existingCrop,
+        history: [newAction, ...(existingCrop.history || [])],
+        // Actualizar campos si se proporcionan
+        ...(cropData.humidity && { humidity: cropData.humidity }),
+        ...(cropData.bioFertilizer && { bioFertilizer: cropData.bioFertilizer }),
+        ...(cropData.observations && { observations: cropData.observations }),
+        ...(cropData.recommendations && { recommendations: cropData.recommendations }),
+        updatedAt: new Date().toISOString()
+      };
+
+      // Reemplazar en el array
+      const updatedCrops = localCrops.map(crop => 
+        crop.id === existingCrop.id ? updatedCrop : crop
+      );
+
+      await AsyncStorage.setItem('localCrops', JSON.stringify(updatedCrops));
+      savedCrop = updatedCrop;
+
+      console.log('✅ Acción agregada a cultivo local existente:', existingCrop.id);
+
+    } else {
+      // 🆕 CREAR NUEVO CULTIVO LOCAL
+      console.log('🆕 Creando nuevo cultivo local...');
+      savedCrop = await saveCropLocalEnhanced(cropData);
+    }
+
+    if (savedCrop) {
+      Alert.alert(
+        existingCrop ? '✅ Acción Agregada' : '💾 Nuevo Cultivo Local',
+        existingCrop 
+          ? `Acción agregada al cultivo "${cropData.crop}" existente. Se sincronizará cuando tengas conexión.`
+          : `Nuevo cultivo "${cropData.crop}" guardado localmente. Se sincronizará cuando tengas conexión.`,
+        [
+          { 
+            text: 'OK', 
+            onPress: () => {
+              resetForm();
+              setTimeout(() => router.back(), 1000);
+            }
+          },
+          {
+            text: 'Ver Historial',
+            onPress: () => {
+              resetForm();
+              router.push('/farmer/history');
+            }
+          }
+        ]
+      );
+    } else {
+      console.log('❌ No se pudo guardar el cultivo');
+      Alert.alert('❌ Error', 'No se pudo guardar la acción');
+    }
+  } catch (error) {
+    console.log('❌ Error en guardado offline con agrupación:', error);
+    Alert.alert('❌ Error', `No se pudo guardar la acción localmente: ${error.message}`);
+  }
+};
   const resetForm = () => {
     setForm({
       crop: '',

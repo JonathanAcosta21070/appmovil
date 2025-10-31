@@ -1,4 +1,4 @@
-// app/farmer/home-farmer.js - VERSIÓN SIN BOTÓN DE SINCRONIZACIÓN
+// app/farmer/home-farmer.js - VERSIÓN CON ÚLTIMA RECOMENDACIÓN NO CLICABLE
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
@@ -6,8 +6,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSync } from '../../contexts/SyncContext';
 
 export default function HomeFarmer() {
-  const [lastData, setLastData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [recommendations, setRecommendations] = useState([]);
+  const [lastRecommendation, setLastRecommendation] = useState(null);
   const { clearUser } = useSync();
   
   // 🔹 Usar el contexto global
@@ -22,7 +23,7 @@ export default function HomeFarmer() {
   useFocusEffect(
     React.useCallback(() => {
       console.log('🎯 Pantalla home-farmer enfocada');
-      loadDataFromMongoDB();
+      loadRecommendations();
     }, [])
   );
 
@@ -30,7 +31,7 @@ export default function HomeFarmer() {
     console.log('🔍 Estado del usuario:', user ? `Conectado como ${user.email}` : 'No hay usuario');
     
     if (user) {
-      loadDataFromMongoDB();
+      loadRecommendations();
     } else {
       loadUserFromStorage();
     }
@@ -45,7 +46,7 @@ export default function HomeFarmer() {
         console.log('📱 Usuario cargado desde storage:', userData.email);
         
         if (userData.id && userData.email) {
-          loadDataFromMongoDB();
+          loadRecommendations();
         } else {
           console.log('❌ Usuario incompleto en storage');
           await AsyncStorage.removeItem('user');
@@ -61,39 +62,83 @@ export default function HomeFarmer() {
     }
   };
 
-  // 🔹 Función mejorada para cargar datos
-  const loadDataFromMongoDB = async () => {
+  // 🔹 Función para cargar recomendaciones
+  const loadRecommendations = async () => {
     try {
-      setIsLoading(true);
-      
       if (!user || !user.id) {
-        console.log('⚠️ Esperando usuario...');
+        console.log('⚠️ Esperando usuario para cargar recomendaciones...');
         return;
       }
-      
-      console.log('👤 Cargando datos para usuario:', user.email);
 
-      // ✅ Cargar datos del sensor
-      const sensorResponse = await fetch(`${API_BASE_URL}/farmer/sensor-data/latest`, {
-        headers: {
-          'Authorization': user.id
+      console.log('📋 Cargando recomendaciones para usuario:', user.email);
+
+      // Intentar cargar desde el servidor
+      if (isConnected) {
+        const response = await fetch(`${API_BASE_URL}/farmer/alerts`, {
+          headers: {
+            'Authorization': user.id
+          }
+        });
+        
+        if (response.ok) {
+          const serverAlerts = await response.json();
+          console.log('✅ Recomendaciones cargadas del servidor:', serverAlerts.length);
+          setRecommendations(serverAlerts);
+          
+          // Guardar localmente para uso offline
+          await AsyncStorage.setItem('farmerAlerts', JSON.stringify(serverAlerts));
+          
+          // Establecer la última recomendación
+          if (serverAlerts.length > 0) {
+            setLastRecommendation(serverAlerts[0]);
+          } else {
+            setLastRecommendation(null);
+          }
+          return;
         }
-      });
-      
-      if (sensorResponse.ok) {
-        const sensorData = await sensorResponse.json();
-        console.log('📈 Datos de sensor recibidos:', sensorData);
-        setLastData(sensorData);
+      }
+
+      // Fallback: cargar desde almacenamiento local
+      const localAlerts = await AsyncStorage.getItem('farmerAlerts');
+      if (localAlerts) {
+        const parsedAlerts = JSON.parse(localAlerts);
+        console.log('📱 Recomendaciones cargadas localmente:', parsedAlerts.length);
+        setRecommendations(parsedAlerts);
+        
+        if (parsedAlerts.length > 0) {
+          setLastRecommendation(parsedAlerts[0]);
+        } else {
+          setLastRecommendation(null);
+        }
       } else {
-        console.log('❌ Error en sensor response:', sensorResponse.status);
-        setLastData(null);
+        // Datos de ejemplo para demo
+        const sampleAlerts = [
+          {
+            id: 1,
+            title: 'Recomendación de Riego',
+            message: 'Basado en los datos de humedad del suelo, considera aumentar la frecuencia de riego en un 20% para la próxima semana.',
+            type: 'warning',
+            date: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 horas atrás
+            read: false,
+            from: 'Técnico Agrícola'
+          },
+          {
+            id: 2,
+            title: 'Programa de Fertilización',
+            message: 'Momento óptimo para fertilización orgánica. Recomiendo usar té de compost para mejor absorción de nutrientes.',
+            type: 'info',
+            date: new Date(Date.now() - 24 * 60 * 60 * 1000), // 1 día atrás
+            read: true,
+            from: 'Dr. Rodríguez'
+          }
+        ];
+        setRecommendations(sampleAlerts);
+        setLastRecommendation(sampleAlerts[0]);
+        await AsyncStorage.setItem('farmerAlerts', JSON.stringify(sampleAlerts));
       }
 
     } catch (error) {
-      console.log('❌ Error loading data from MongoDB:', error);
-      Alert.alert('Error', 'No se pudieron cargar los datos');
-    } finally {
-      setIsLoading(false);
+      console.log('❌ Error cargando recomendaciones:', error);
     }
   };
 
@@ -122,15 +167,6 @@ export default function HomeFarmer() {
     );
   };
 
-  const getMoistureStatus = (moisture) => {
-    if (!moisture) return { text: 'Sin datos', color: '#666', icon: '❓' };
-    if (moisture < 30) return { text: 'Necesita riego', color: '#f44336', icon: '⚠️' };
-    if (moisture < 60) return { text: 'Óptimo', color: '#4caf50', icon: '✅' };
-    return { text: 'Suelo húmedo', color: '#2196f3', icon: '💧' };
-  };
-
-  const status = getMoistureStatus(lastData?.moisture);
-
   return (
     <ScrollView 
       style={styles.container}
@@ -154,7 +190,7 @@ export default function HomeFarmer() {
         <View style={styles.statusContainer}>
           <View style={[styles.connectionBadge, { backgroundColor: isConnected ? '#4caf50' : '#ff9800' }]}>
             <Text style={styles.connectionText}>
-
+              {isConnected ? 'En línea' : 'Sin conexión'}
             </Text>
           </View>
           
@@ -179,40 +215,82 @@ export default function HomeFarmer() {
                 {isConnected ? 'En línea' : 'Sin conexión'}
               </Text>
             </View>
-    
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Recomendaciones:</Text>
+              <Text style={styles.infoValue}>
+                {recommendations.length} recibidas
+              </Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Acciones pendientes:</Text>
+              <Text style={[styles.infoValue, { color: unsyncedCount > 0 ? '#ff9800' : '#4caf50' }]}>
+                {unsyncedCount} por sincronizar
+              </Text>
+            </View>
           </View>
         </View>
       </View>
 
-      {/* Tarjeta de Estado del Suelo */}
-      <View style={styles.statusCard}>
-        <Text style={styles.cardTitle}>🌱 Estado del Suelo</Text>
+      {/* 🔄 SECCIÓN DE RECOMENDACIONES */}
+      <View style={styles.recommendationsSection}>
+        <Text style={styles.sectionTitle}>💡 Recomendaciones del Científico</Text>
         
-        <View style={styles.statusRow}>
-          <View style={styles.statusItem}>
-            <Text style={styles.statusLabel}>Humedad del Suelo</Text>
-            <Text style={[styles.statusValue, { color: status.color }]}>
-              {lastData ? `${lastData.moisture}%` : '--%'}
-            </Text>
-            <Text style={[styles.statusText, { color: status.color }]}>
-              {status.icon} {status.text}
-            </Text>
+        {/* Última recomendación - NO ES UN BOTÓN */}
+        <View style={styles.lastRecommendationCard}>
+          <View style={styles.recommendationHeader}>
+            <Text style={styles.recommendationIcon}>📢</Text>
+            <View style={styles.recommendationTextContainer}>
+              <Text style={styles.recommendationTitle}>
+                {lastRecommendation ? 'Última Recomendación' : 'Sin Recomendaciones'}
+              </Text>
+              <Text style={styles.recommendationSubtitle}>
+                {lastRecommendation 
+                  ? `De: ${lastRecommendation.from}` 
+                  : 'No hay recomendaciones recientes'}
+              </Text>
+            </View>
+            {lastRecommendation && !lastRecommendation.read && (
+              <View style={styles.unreadBadge} />
+            )}
           </View>
           
-          <View style={styles.statusItem}>
-            <Text style={styles.statusLabel}>Temperatura</Text>
-            <Text style={styles.statusValue}>
-              {lastData ? `${lastData.temperature}°C` : '--°C'}
-            </Text>
-            <Text style={styles.statusText}>🌡️ Ambiente</Text>
-          </View>
+          {lastRecommendation ? (
+            <View style={styles.recommendationContent}>
+              <Text style={styles.recommendationMessage}>
+                {lastRecommendation.message}
+              </Text>
+              <Text style={styles.recommendationDate}>
+                📅 {new Date(lastRecommendation.date).toLocaleDateString('es-MX', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.noRecommendations}>
+              <Text style={styles.noRecommendationsText}>
+                No hay recomendaciones disponibles en este momento
+              </Text>
+            </View>
+          )}
         </View>
 
-        <Text style={styles.lastUpdate}>
-          {lastData 
-            ? `Última lectura: ${new Date(lastData.date).toLocaleDateString('es-MX')}`
-            : 'No hay datos recientes'}
-        </Text>
+        {/* Botón para ver todas las recomendaciones */}
+        <TouchableOpacity 
+          style={styles.allRecommendationsButton}
+          onPress={() => router.push('/farmer/alerts')}
+        >
+          <Text style={styles.allRecommendationsIcon}>📋</Text>
+          <View style={styles.allRecommendationsTextContainer}>
+            <Text style={styles.allRecommendationsTitle}>Ver Todas las Recomendaciones</Text>
+            <Text style={styles.allRecommendationsSubtitle}>
+              {recommendations.length} recomendaciones en total
+            </Text>
+          </View>
+          <Text style={styles.menuArrow}>›</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Menú principal */}
@@ -374,51 +452,118 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  statusCard: {
+  // 🔄 ESTILOS PARA RECOMENDACIONES
+  recommendationsSection: {
+    padding: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 16,
+  },
+  // ÚLTIMA RECOMENDACIÓN - NO CLICABLE
+  lastRecommendationCard: {
     backgroundColor: 'white',
-    margin: 16,
-    padding: 20,
+    padding: 16,
     borderRadius: 12,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196f3',
+  },
+  recommendationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  recommendationIcon: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  recommendationTextContainer: {
+    flex: 1,
+  },
+  recommendationTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  recommendationSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 2,
+  },
+  unreadBadge: {
+    width: 8,
+    height: 8,
+    backgroundColor: '#f44336',
+    borderRadius: 4,
+  },
+  recommendationContent: {
+    marginTop: 8,
+  },
+  recommendationMessage: {
+    fontSize: 14,
+    color: '#555',
+    lineHeight: 20,
+    marginBottom: 12,
+    textAlign: 'left',
+  },
+  recommendationDate: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'right',
+    fontStyle: 'italic',
+  },
+  noRecommendations: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  noRecommendationsText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  // BOTÓN PARA VER TODAS LAS RECOMENDACIONES
+  allRecommendationsButton: {
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 15,
-    color: '#333',
+  allRecommendationsIcon: {
+    fontSize: 24,
+    marginRight: 12,
   },
-  statusRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  statusItem: {
-    alignItems: 'center',
+  allRecommendationsTextContainer: {
     flex: 1,
   },
-  statusLabel: {
-    fontSize: 14,
+  allRecommendationsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  allRecommendationsSubtitle: {
+    fontSize: 12,
     color: '#666',
-    marginBottom: 5,
+    marginTop: 2,
   },
-  statusValue: {
-    fontSize: 24,
+  menuArrow: {
+    fontSize: 20,
+    color: '#666',
     fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  lastUpdate: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 15,
-    textAlign: 'center',
-    fontStyle: 'italic',
   },
   menuSection: {
     padding: 16,
@@ -459,11 +604,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     marginTop: 2,
-  },
-  menuArrow: {
-    fontSize: 20,
-    color: '#666',
-    fontWeight: 'bold',
   },
   pendingDot: {
     position: 'absolute',

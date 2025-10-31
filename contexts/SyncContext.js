@@ -45,29 +45,38 @@ export const SyncProvider = ({ children }) => {
   }, []);
 
   // 🔍 CARGAR USUARIO
-  const loadUser = async () => {
-    try {
-      const userData = await AsyncStorage.getItem('user');
-      if (userData) {
-        const userObj = JSON.parse(userData);
-        setUser(userObj);
-        console.log('👤 Usuario cargado:', userObj.email);
-      }
-    } catch (error) {
-      console.log('❌ Error cargando usuario:', error);
+// 🔍 CARGAR USUARIO - VERIFICAR
+const loadUser = async () => {
+  try {
+    const userData = await AsyncStorage.getItem('user');
+    console.log('📥 Datos de usuario crudos:', userData);
+    
+    if (userData) {
+      const userObj = JSON.parse(userData);
+      console.log('👤 Usuario parseado:', userObj);
+      console.log('🔐 User ID cargado:', userObj.id);
+      
+      setUser(userObj);
     }
-  };
+  } catch (error) {
+    console.log('❌ Error cargando usuario:', error);
+  }
+};
 
   // 💾 GUARDAR USUARIO
-  const saveUser = async (userData) => {
-    try {
-      await AsyncStorage.setItem('user', JSON.stringify(userData));
-      setUser(userData);
-      console.log('💾 Usuario guardado:', userData.email);
-    } catch (error) {
-      console.log('❌ Error guardando usuario:', error);
-    }
-  };
+// 💾 GUARDAR USUARIO - VERIFICAR
+const saveUser = async (userData) => {
+  try {
+    console.log('💾 Guardando usuario:', userData);
+    console.log('🔐 User ID a guardar:', userData.id);
+    
+    await AsyncStorage.setItem('user', JSON.stringify(userData));
+    setUser(userData);
+    console.log('✅ Usuario guardado correctamente');
+  } catch (error) {
+    console.log('❌ Error guardando usuario:', error);
+  }
+};
 
   // 🚪 CERRAR SESIÓN
   const logout = async () => {
@@ -84,116 +93,126 @@ export const SyncProvider = ({ children }) => {
     }
   };
 
-  // 🔄 OBTENER CULTIVOS (CON FALLBACK OFFLINE)
-  const getUserCrops = async () => {
+  // 🔄 OBTENER CULTIVOS (CON FALLBACK OFFLINE) - VERSIÓN CORREGIDA
+// 🔄 OBTENER CULTIVOS - VERSIÓN CORREGIDA
+// 🔄 OBTENER CULTIVOS - VERSIÓN CORREGIDA
+const getUserCrops = async () => {
+  try {
+    console.log('🔍 DEBUG: Iniciando getUserCrops');
+    console.log('👤 User ID:', user?.id);
+    console.log('🔗 API_BASE_URL:', API_BASE_URL);
+
+    // Siempre obtener datos locales primero
+    const localCrops = await getLocalCrops();
+    console.log('📁 Cultivos locales:', localCrops.length);
+
+    if (!user?.id || !isConnected) {
+      console.log('❌ No hay usuario o sin conexión');
+      return localCrops;
+    }
+
+    console.log('🔄 Conectando al servidor...');
+    
+    // ✅ CORREGIR: Quitar el /api/ duplicado
+    const url = `${API_BASE_URL}/farmer/crops`;
+    console.log('🔗 URL CORREGIDA:', url);
+    console.log('🔐 Authorization header:', user.id);
+    
     try {
-      // Siempre obtener datos locales primero
-      const localCrops = await getLocalCrops();
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': user.id.toString(),
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      });
+
+      console.log('📡 Status de respuesta:', response.status);
+      console.log('📡 OK:', response.ok);
       
-      if (!user?.id) {
-        console.log('❌ No hay usuario logueado, solo datos locales:', localCrops.length);
+      if (response.ok) {
+        const serverData = await response.json();
+        console.log('✅ Datos del servidor recibidos:', serverData.length);
+        
+        const localUnsynced = localCrops.filter(crop => !crop.synced);
+        const allData = [...serverData, ...localUnsynced];
+        
+        console.log('📊 Total datos combinados:', allData.length);
+        return allData;
+      } else {
+        const errorText = await response.text();
+        console.log('❌ Error del servidor:', response.status);
         return localCrops;
       }
-
-      if (isConnected) {
-        console.log('🔄 Obteniendo datos del servidor...');
-        
-        try {
-          const response = await fetch(`${API_BASE_URL}/crops`, {
-            headers: {
-              'Authorization': user.id
-            },
-            timeout: 10000
-          });
-
-          if (response.ok) {
-            const serverData = await response.json();
-            console.log('✅ Datos del servidor:', serverData.length);
-            
-            // Filtrar datos locales no sincronizados
-            const localUnsynced = localCrops.filter(crop => !crop.synced);
-            
-            // Combinar datos
-            const allData = [...serverData, ...localUnsynced];
-            console.log(`📊 Datos combinados: ${serverData.length} servidor + ${localUnsynced.length} locales pendientes`);
-            
-            return allData;
-          } else {
-            console.log('❌ Error del servidor:', response.status);
-            throw new Error(`Error ${response.status}`);
-          }
-        } catch (serverError) {
-          console.log('❌ Error conectando al servidor, usando solo datos locales:', serverError.message);
-          return localCrops;
-        }
-      }
-
-      // 🔄 MODO OFFLINE: devolver datos locales
-      console.log('📴 Modo offline - usando datos locales:', localCrops.length);
+    } catch (fetchError) {
+      console.log('❌ Error de fetch:', fetchError.message);
       return localCrops;
-      
-    } catch (error) {
-      console.log('❌ Error obteniendo datos, usando locales:', error.message);
-      return await getLocalCrops();
     }
-  };
 
-  // 💾 OBTENER CULTIVOS LOCALES
-  const getLocalCrops = async () => {
-    try {
-      const localCropsString = await AsyncStorage.getItem('localCrops') || '[]';
-      const localCrops = JSON.parse(localCropsString);
-      
-      // Filtrar por usuario actual si está logueado
-      const userCrops = user?.id 
-        ? localCrops.filter(crop => crop.userId === user.id)
-        : localCrops;
-      
-      console.log('📁 Cultivos locales encontrados:', userCrops.length);
-      return userCrops;
-    } catch (error) {
-      console.log('❌ Error obteniendo cultivos locales:', error);
-      return [];
-    }
-  };
+  } catch (error) {
+    console.log('❌ Error en getUserCrops:', error.message);
+    return await getLocalCrops();
+  }
+};
+
+// 📁 OBTENER CULTIVOS LOCALES - FUNCIÓN FALTANTE
+const getLocalCrops = async () => {
+  try {
+    const localCropsString = await AsyncStorage.getItem('localCrops') || '[]';
+    const localCrops = JSON.parse(localCropsString);
+    
+    // Filtrar por usuario actual si existe
+    const userCrops = user?.id 
+      ? localCrops.filter(crop => crop.userId === user.id)
+      : localCrops;
+    
+    console.log('📁 Cultivos locales encontrados:', userCrops.length);
+    return userCrops;
+  } catch (error) {
+    console.log('❌ Error obteniendo cultivos locales:', error);
+    return [];
+  }
+};
 
   // 💾 GUARDAR CULTIVO LOCAL (OFFLINE)
   const saveCropLocal = async (cropData) => {
-    try {
-      const cropToSave = {
-        ...cropData,
-        id: `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        synced: false,
-        createdAt: new Date().toISOString(),
-        userId: user?.id,
-        _source: 'local',
-        history: cropData.history || [{
-          date: new Date().toISOString(),
-          type: cropData.actionType || 'other',
-          seed: cropData.seed || '',
-          action: generateActionDescription(cropData.actionType, cropData.seed, cropData.bioFertilizer),
-          bioFertilizer: cropData.bioFertilizer || '',
-          observations: cropData.observations || '',
-          synced: false
-        }]
-      };
+  try {
+    const cropToSave = {
+      ...cropData,
+      id: `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      synced: false,
+      createdAt: new Date().toISOString(),
+      userId: user?.id,
+      _source: 'local',
+      history: cropData.history || [{
+        _id: `action-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        date: new Date().toISOString(),
+        type: cropData.actionType || 'other',
+        seed: cropData.seed || '',
+        action: generateActionDescription(cropData.actionType, cropData.seed, cropData.bioFertilizer),
+        bioFertilizer: cropData.bioFertilizer || '',
+        observations: cropData.observations || '',
+        synced: false
+      }]
+    };
 
-      const existingCrops = await getLocalCrops();
-      existingCrops.push(cropToSave);
-      
-      await AsyncStorage.setItem('localCrops', JSON.stringify(existingCrops));
-      
-      // Actualizar contador
-      await checkPendingSync();
-      
-      console.log('💾 Cultivo guardado localmente, ID:', cropToSave.id);
-      
-      return cropToSave;
-    } catch (error) {
-      console.log('❌ Error guardando localmente:', error);
-      throw error;
-    }
-  };
+    const existingCrops = await getLocalCrops();
+    existingCrops.push(cropToSave);
+    
+    await AsyncStorage.setItem('localCrops', JSON.stringify(existingCrops));
+    
+    // Actualizar contador
+    await checkPendingSync();
+    
+    console.log('💾 Cultivo guardado localmente, ID:', cropToSave.id);
+    
+    return cropToSave;
+  } catch (error) {
+    console.log('❌ Error guardando localmente:', error);
+    throw error;
+  }
+};
 
   // 🔄 GENERAR DESCRIPCIÓN DE ACCIÓN
   const generateActionDescription = (type, seed, bioFertilizer) => {
@@ -270,17 +289,17 @@ export const SyncProvider = ({ children }) => {
           // Preparar datos para enviar (remover campos internos)
           const { id, _source, ...cropToSend } = crop;
           
-          const response = await fetch(`${API_BASE_URL}/crops`, {
+          const response = await fetch(`${API_BASE_URL}/farmer/crops`, {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json',
-              'Authorization': user.id
-            },
+                  'Content-Type': 'application/json',
+                  'Authorization': user.id
+              },
             body: JSON.stringify({
-              ...cropToSend,
-              synced: true
-            })
-          });
+                  ...cropToSend,
+                  synced: true
+              })
+           });
 
           if (response.ok) {
             // Marcar como sincronizado en local

@@ -67,7 +67,6 @@ export default function FarmerDetails() {
       <View style={styles.header}>
         <Text style={styles.title}>👨‍🌾 {farmer.name}</Text>
         <Text style={styles.subtitle}>{farmer.email}</Text>
-        <Text style={styles.details}>{farmer.ubicacion} • {farmer.cultivo}</Text>
       </View>
 
       {/* Información de Contacto */}
@@ -79,14 +78,6 @@ export default function FarmerDetails() {
             <Text style={styles.infoValue}>{farmer.email}</Text>
           </View>
           <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>Ubicación</Text>
-            <Text style={styles.infoValue}>{farmer.ubicacion}</Text>
-          </View>
-          <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>Cultivo Principal</Text>
-            <Text style={styles.infoValue}>{farmer.cultivo}</Text>
-          </View>
-          <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>Fecha Registro</Text>
             <Text style={styles.infoValue}>
               {new Date(farmer.fechaRegistro).toLocaleDateString()}
@@ -95,17 +86,9 @@ export default function FarmerDetails() {
         </View>
       </View>
 
-      {/* Cultivos del Agricultor */}
+      {/* Cultivos del Agricultor - SIN BOTÓN DE RECOMENDAR */}
       <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>🌱 Cultivos Activos</Text>
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={() => router.push(`/scientist/recommendations?farmerId=${farmerId}`)}
-          >
-            <Text style={styles.actionButtonText}>💡 Recomendar</Text>
-          </TouchableOpacity>
-        </View>
+        <Text style={styles.sectionTitle}>🌱 Cultivos Activos</Text>
 
         {crops.length === 0 ? (
           <Text style={styles.noDataText}>No hay cultivos activos</Text>
@@ -145,54 +128,6 @@ export default function FarmerDetails() {
           })
         )}
       </View>
-
-      {/* Datos Recientes de Sensores */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>📊 Datos de Sensores Recientes</Text>
-        {sensorData.length === 0 ? (
-          <Text style={styles.noDataText}>No hay datos de sensores recientes</Text>
-        ) : (
-          sensorData.slice(0, 10).map((data) => (
-            <View key={data._id} style={styles.dataCard}>
-              <View style={styles.dataHeader}>
-                <Text style={styles.dataCrop}>{data.crop}</Text>
-                <Text style={styles.dataDate}>
-                  {new Date(data.date).toLocaleDateString()}
-                </Text>
-              </View>
-              <View style={styles.dataGrid}>
-                <Text style={styles.dataValue}>💧 {data.moisture}%</Text>
-                <Text style={styles.dataValue}>🌡️ {data.temperature}°C</Text>
-                <Text style={styles.dataValue}>💨 {data.humidity}%</Text>
-                {data.ph && <Text style={styles.dataValue}>🧪 pH: {data.ph}</Text>}
-              </View>
-              <Text style={styles.dataLocation}>{data.location}</Text>
-            </View>
-          ))
-        )}
-      </View>
-
-      {/* Acciones Rápidas */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>🔬 Acciones Rápidas</Text>
-        <View style={styles.actionsGrid}>
-          <TouchableOpacity 
-            style={styles.quickAction}
-            onPress={() => router.push(`/scientist/recommendations?farmerId=${farmerId}`)}
-          >
-            <Text style={styles.actionIcon}>💡</Text>
-            <Text style={styles.actionText}>Recomendar</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.quickAction}
-            onPress={() => router.push(`/scientist/reports?farmerId=${farmerId}`)}
-          >
-            <Text style={styles.actionIcon}>📈</Text>
-            <Text style={styles.actionText}>Reportes</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
     </ScrollView>
   );
 }
@@ -202,7 +137,6 @@ const styles = StyleSheet.create({
   header: { backgroundColor: '#7b1fa2', padding: 20, paddingTop: 50 },
   title: { fontSize: 24, fontWeight: 'bold', color: 'white', marginBottom: 4 },
   subtitle: { fontSize: 16, color: 'white', opacity: 0.9, marginBottom: 2 },
-  details: { fontSize: 14, color: 'white', opacity: 0.8 },
   section: {
     backgroundColor: 'white',
     margin: 16,
@@ -214,20 +148,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
-  actionButton: {
-    backgroundColor: '#4caf50',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  actionButtonText: { color: 'white', fontWeight: 'bold', fontSize: 12 },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 12 },
   infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   infoItem: { width: '48%', marginBottom: 12 },
   infoLabel: { fontSize: 12, color: '#666', marginBottom: 4 },
@@ -249,17 +170,6 @@ const styles = StyleSheet.create({
   cropDate: { fontSize: 11, color: '#999', marginBottom: 4 },
   historyBadge: { alignSelf: 'flex-start', backgroundColor: '#f3e5f5', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
   historyText: { fontSize: 10, color: '#7b1fa2', fontWeight: '500' },
-  dataCard: { backgroundColor: '#f8f9fa', padding: 12, borderRadius: 8, marginBottom: 8 },
-  dataHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  dataCrop: { fontSize: 14, fontWeight: 'bold', color: '#333' },
-  dataDate: { fontSize: 11, color: '#999' },
-  dataGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
-  dataValue: { fontSize: 12, color: '#666' },
-  dataLocation: { fontSize: 11, color: '#999', fontStyle: 'italic' },
-  actionsGrid: { flexDirection: 'row', justifyContent: 'space-around' },
-  quickAction: { alignItems: 'center', padding: 12 },
-  actionIcon: { fontSize: 24, marginBottom: 4 },
-  actionText: { fontSize: 12, color: '#333', fontWeight: '500' },
   loadingText: { textAlign: 'center', marginTop: 50, fontSize: 16, color: '#666' },
   errorText: { textAlign: 'center', marginTop: 50, fontSize: 16, color: '#f44336' },
   noDataText: { textAlign: 'center', color: '#999', fontStyle: 'italic', padding: 20 },

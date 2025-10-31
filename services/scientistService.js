@@ -1,4 +1,4 @@
-// services/scientistService.js - VERSIÓN COMPLETA Y MEJORADA
+// services/scientistService.js - VERSIÓN COMPLETA Y CORREGIDA
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import API_CONFIG from '../config/api';
 
@@ -84,7 +84,7 @@ export const scientistService = {
     }
   },
 
-  // Obtener detalles de un agricultor
+  // Obtener detalles de un agricultor - CORREGIDO
   async getFarmerDetails(userId, farmerId) {
     try {
       console.log('🔍 [SERVICE] Obteniendo detalles del agricultor:', farmerId);
@@ -106,6 +106,20 @@ export const scientistService = {
       
     } catch (error) {
       console.log('❌ [SERVICE] Error en getFarmerDetails:', error);
+      
+      // Si hay error 404, retornar datos básicos
+      if (error.message.includes('404')) {
+        console.log('⚠️ [SERVICE] Agricultor no encontrado, retornando datos básicos');
+        return {
+          _id: farmerId,
+          name: 'Agricultor',
+          email: 'email@ejemplo.com',
+          ubicacion: 'Ubicación no disponible',
+          cultivo: 'Cultivo no especificado',
+          fechaRegistro: new Date().toISOString()
+        };
+      }
+      
       throw new Error(error.message || 'Error al cargar los detalles del agricultor');
     }
   },
@@ -176,7 +190,7 @@ export const scientistService = {
     }
   },
 
-  // Obtener detalles de un cultivo específico - VERSIÓN MEJORADA
+  // Obtener detalles de un cultivo específico
   async getCropDetails(userId, cropId) {
     try {
       console.log('🔍 [SERVICE] Obteniendo detalles DEL CULTIVO:', cropId);
@@ -193,18 +207,7 @@ export const scientistService = {
       );
 
       const data = await handleResponse(response);
-      console.log('✅ [SERVICE] Detalles del cultivo obtenidos:', {
-        id: data._id,
-        crop: data.crop,
-        location: data.location,
-        historyCount: data.history?.length || 0,
-        hasHumidity: !!data.humidity,
-        hasObservations: !!data.observations,
-        hasSeed: !!data.seed,
-        hasBioFertilizer: !!data.bioFertilizer,
-        farmerName: data.farmerName
-      });
-      
+      console.log('✅ [SERVICE] Detalles del cultivo obtenidos:', data.crop);
       return data;
       
     } catch (error) {
@@ -286,7 +289,7 @@ export const scientistService = {
     }
   },
 
-  // 🔍 NUEVO: Debug endpoint para ver todos los datos del cultivo
+  // 🔍 DEBUG ENDPOINT PARA CULTIVOS
   async debugCropData(userId, cropId) {
     try {
       console.log('🐛 [DEBUG] Solicitando datos de debug para cultivo:', cropId);
@@ -316,7 +319,6 @@ export const scientistService = {
   async sendRecommendation(userId, recommendationData) {
     try {
       console.log('📤 [SERVICE] Enviando recomendación...', {
-        userId,
         recommendationData: {
           farmerId: recommendationData.farmerId,
           cropId: recommendationData.cropId,
@@ -341,7 +343,6 @@ export const scientistService = {
         priority: recommendationData.priority || 'medium',
         scientistId: recommendationData.scientistId,
         scientistName: recommendationData.scientistName || 'Científico',
-        timestamp: recommendationData.timestamp || new Date().toISOString(),
       };
 
       console.log('📦 [SERVICE] Payload a enviar:', payload);
@@ -391,39 +392,44 @@ export const scientistService = {
     }
   },
 
-  // Obtener estadísticas para reportes
-  async getStats(userId, farmerId, timeRange = '7days') {
-    try {
-      console.log('📊 [SERVICE] Obteniendo estadísticas para:', farmerId);
-      
-      const response = await fetchWithTimeout(
-        `${API_BASE_URL}/scientist/stats/${farmerId}?range=${timeRange}`,
-        {
-          method: 'GET',
-          headers: { 
-            'Authorization': userId,
-            'Content-Type': 'application/json'
-          }
+// En scientistService.js - agregar validación
+async getStats(userId, farmerId) {
+  try {
+    console.log('📊 [SERVICE] Obteniendo estadísticas para:', farmerId);
+    
+    // 🔥 VALIDACIÓN: Verificar que farmerId sea válido
+    if (!farmerId || !farmerId.match(/^[0-9a-fA-F]{24}$/)) {
+      console.log('❌ [SERVICE] farmerId inválido:', farmerId);
+      throw new Error('ID de agricultor inválido');
+    }
+    
+    const response = await fetchWithTimeout(
+      `${API_BASE_URL}/scientist/stats/${farmerId}`,
+      {
+        method: 'GET',
+        headers: { 
+          'Authorization': userId,
+          'Content-Type': 'application/json'
         }
-      );
-
-      const data = await handleResponse(response);
-      console.log('✅ [SERVICE] Estadísticas obtenidas');
-      return data;
-      
-    } catch (error) {
-      console.log('❌ [SERVICE] Error en getStats:', error);
-      
-      // Retornar estadísticas vacías si hay error
-      if (error.message.includes('404') || error.message.includes('No se encontraron estadísticas')) {
-        console.log('⚠️ [SERVICE] No se encontraron estadísticas, retornando objeto vacío');
-        return {
-          temperature: { average: 0, min: 0, max: 0 },
-          humidity: { average: 0, min: 0, max: 0 },
-          soilMoisture: { average: 0, min: 0, max: 0 },
-          recommendations: { total: 0, pending: 0, completed: 0 }
-        };
       }
+    );
+
+    const data = await handleResponse(response);
+    console.log('✅ [SERVICE] Estadísticas obtenidas');
+    return data;
+    
+  } catch (error) {
+    console.log('❌ [SERVICE] Error en getStats:', error);
+    
+    if (error.message.includes('ID de agricultor inválido')) {
+      // Retornar estadísticas vacías para IDs inválidos
+      return {
+        farmer: { name: 'No disponible', location: 'No disponible', mainCrop: 'No disponible' },
+        crops: { total: 0, active: 0, harvested: 0 },
+        sensorData: { total: 0, avgMoisture: 0, avgTemperature: 0, needsWater: 0 },
+        lastUpdated: new Date()
+      };
+    }
       
       throw new Error(error.message || 'Error al cargar las estadísticas');
     }
@@ -501,7 +507,7 @@ export const scientistService = {
       console.log('🔍 [SERVICE] Verificando estado del servicio...');
       
       const response = await fetchWithTimeout(
-        `${API_BASE_URL}/health`,
+        `${API_BASE_URL}/api/health`,
         {
           method: 'GET',
           timeout: 5000 // 5 segundos para health check
@@ -582,6 +588,139 @@ export const scientistService = {
       throw new Error(error.message || 'Error al cargar los datos completos del cultivo');
     }
   },
+// 📊 MÉTODOS MEJORADOS PARA ESTADÍSTICAS
+async getFarmersRanking(userId) {
+  try {
+    console.log('🏆 [SERVICE] Obteniendo ranking de agricultores...');
+    
+    const response = await fetchWithTimeout(
+      `${API_BASE_URL}/scientist/stats/farmers/ranking`,
+      {
+        method: 'GET',
+        headers: { 
+          'Authorization': userId,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Error ${response.status}: No se pudo obtener el ranking`);
+    }
+
+    const data = await response.json();
+    console.log('✅ [SERVICE] Ranking de agricultores obtenido:', data.length);
+    
+    // Si no hay datos, retornar array vacío
+    return Array.isArray(data) ? data : [];
+    
+  } catch (error) {
+    console.log('❌ [SERVICE] Error en getFarmersRanking:', error.message);
+    
+    // Retornar array vacío en caso de error
+    return [];
+  }
+},
+
+async getBiofertilizerStats(userId) {
+  try {
+    console.log('🧪 [SERVICE] Obteniendo estadísticas de biofertilizantes...');
+    
+    const response = await fetchWithTimeout(
+      `${API_BASE_URL}/scientist/stats/biofertilizers`,
+      {
+        method: 'GET',
+        headers: { 
+          'Authorization': userId,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Error ${response.status}: No se pudieron obtener estadísticas`);
+    }
+
+    const data = await response.json();
+    console.log('✅ [SERVICE] Estadísticas de biofertilizantes obtenidas:', data.length);
+    
+    // Si no hay datos, retornar array vacío
+    return Array.isArray(data) ? data : [];
+    
+  } catch (error) {
+    console.log('❌ [SERVICE] Error en getBiofertilizerStats:', error.message);
+    
+    // Retornar array vacío en caso de error
+    return [];
+  }
+},
+
+// 🔥 NUEVO MÉTODO: Obtener estadísticas simples
+async getSimpleStats(userId) {
+  try {
+    console.log('📊 [SERVICE] Obteniendo estadísticas simples...');
+    
+    const response = await fetchWithTimeout(
+      `${API_BASE_URL}/scientist/stats/simple`,
+      {
+        method: 'GET',
+        headers: { 
+          'Authorization': userId,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Error ${response.status}: No se pudieron obtener estadísticas`);
+    }
+
+    const data = await response.json();
+    console.log('✅ [SERVICE] Estadísticas simples obtenidas');
+    
+    return data;
+    
+  } catch (error) {
+    console.log('❌ [SERVICE] Error en getSimpleStats:', error.message);
+    
+    // Retornar objeto vacío en caso de error
+    return {
+      rankingAgricultores: [],
+      biofertilizantes: [],
+      general: {
+        totalAgricultores: 0,
+        totalProyectos: 0,
+        totalBiofertilizantes: 0
+      }
+    };
+  }
+},
+
+// Obtener todas las estadísticas
+async getCompleteStats(userId) {
+  try {
+    console.log('📊 [SERVICE] Obteniendo estadísticas completas...');
+    
+    const response = await fetchWithTimeout(
+      `${API_BASE_URL}/scientist/stats/complete`,
+      {
+        method: 'GET',
+        headers: { 
+          'Authorization': userId,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const data = await handleResponse(response);
+    console.log('✅ [SERVICE] Estadísticas completas obtenidas');
+    return data;
+    
+  } catch (error) {
+    console.log('❌ [SERVICE] Error en getCompleteStats:', error);
+    throw new Error(error.message || 'Error al cargar estadísticas completas');
+  }
+},
 
   // 🆕 NUEVO MÉTODO: Obtener datos extendidos del cultivo (incluyendo debug)
   async getCropExtendedData(userId, cropId) {
@@ -618,6 +757,35 @@ export const scientistService = {
     } catch (error) {
       console.log('❌ [SERVICE] Error en getCropExtendedData:', error);
       throw new Error(error.message || 'Error al cargar los datos extendidos del cultivo');
+    }
+  },
+
+  // Método utilitario para formatear fechas
+  formatDate(dateString) {
+    if (!dateString) return 'No disponible';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('es-ES', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    } catch (error) {
+      return 'Fecha inválida';
+    }
+  },
+
+  // Método utilitario para calcular días desde una fecha
+  getDaysFromDate(dateString) {
+    if (!dateString) return 0;
+    try {
+      const date = new Date(dateString);
+      const now = new Date();
+      const diffTime = Math.abs(now - date);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      return diffDays;
+    } catch (error) {
+      return 0;
     }
   }
 };

@@ -1,4 +1,4 @@
-// app/scientist/recommendations.js
+// app/scientist/recommendations.js - VERSIÓN SIMPLIFICADA
 import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity, Alert } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -44,58 +44,57 @@ export default function Recommendations() {
     }
   };
 
-const handleSubmitRecommendation = async () => {
-  if (!selectedFarmer || !recommendation.trim()) {
-    Alert.alert('Error', 'Por favor selecciona un agricultor y escribe una recomendación');
-    return;
-  }
-
-  setIsSubmitting(true);
-  try {
-    console.log('Preparando para enviar recomendación:', {
-      selectedFarmer,
-      selectedCrop,
-      recommendation: recommendation.trim(),
-      priority,
-      scientistId: user.id,
-      scientistName: user.name,
-    });
-
-    await scientistService.sendRecommendation(user.id, {
-      farmerId: selectedFarmer,
-      cropId: selectedCrop || null, // Asegurar que sea null si está vacío
-      recommendation: recommendation.trim(),
-      priority,
-      scientistId: user.id,
-      scientistName: user.name,
-      timestamp: new Date().toISOString(), // Agregar timestamp
-    });
-
-    Alert.alert('Éxito', 'Recomendación enviada correctamente');
-    setRecommendation('');
-    setSelectedCrop('');
-    setSelectedFarmer('');
-    router.back();
-    
-  } catch (error) {
-    console.log('Error detallado enviando recomendación:', error);
-    
-    // Mensaje de error más específico
-    let errorMessage = 'No se pudo enviar la recomendación';
-    
-    if (error.message.includes('Network request failed')) {
-      errorMessage = 'Error de conexión. Verifica tu internet.';
-    } else if (error.message.includes('401') || error.message.includes('403')) {
-      errorMessage = 'Error de autenticación. Vuelve a iniciar sesión.';
-    } else if (error.message.includes('500')) {
-      errorMessage = 'Error del servidor. Intenta más tarde.';
+  const handleSubmitRecommendation = async () => {
+    if (!selectedFarmer || !recommendation.trim()) {
+      Alert.alert('Error', 'Por favor selecciona un agricultor y escribe una recomendación');
+      return;
     }
-    
-    Alert.alert('Error', errorMessage);
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+
+    setIsSubmitting(true);
+    try {
+      console.log('Preparando para enviar recomendación:', {
+        selectedFarmer,
+        selectedCrop,
+        recommendation: recommendation.trim(),
+        priority,
+        scientistId: user.id,
+        scientistName: user.name,
+      });
+
+      await scientistService.sendRecommendation(user.id, {
+        farmerId: selectedFarmer,
+        cropId: selectedCrop || null,
+        recommendation: recommendation.trim(),
+        priority,
+        scientistId: user.id,
+        scientistName: user.name,
+        timestamp: new Date().toISOString(),
+      });
+
+      Alert.alert('Éxito', 'Recomendación enviada correctamente');
+      setRecommendation('');
+      setSelectedCrop('');
+      setSelectedFarmer('');
+      router.back();
+      
+    } catch (error) {
+      console.log('Error detallado enviando recomendación:', error);
+      
+      let errorMessage = 'No se pudo enviar la recomendación';
+      
+      if (error.message.includes('Network request failed')) {
+        errorMessage = 'Error de conexión. Verifica tu internet.';
+      } else if (error.message.includes('401') || error.message.includes('403')) {
+        errorMessage = 'Error de autenticación. Vuelve a iniciar sesión.';
+      } else if (error.message.includes('500')) {
+        errorMessage = 'Error del servidor. Intenta más tarde.';
+      }
+      
+      Alert.alert('Error', errorMessage);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const getSelectedFarmer = () => {
     return farmers.find(f => f._id === selectedFarmer);
@@ -132,7 +131,9 @@ const handleSubmitRecommendation = async () => {
                 ]}>
                   {farmer.name}
                 </Text>
-                <Text style={styles.farmerOptionCrop}>{farmer.cultivo}</Text>
+                <Text style={styles.farmerOptionCrop}>
+                  {farmer.cultivo || 'Agricultor'}
+                </Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -141,37 +142,39 @@ const handleSubmitRecommendation = async () => {
         {/* Información del Agricultor Seleccionado */}
         {selectedFarmer && (
           <View style={styles.farmerInfo}>
+            <Text style={styles.farmerInfoTitle}>📋 Información del Agricultor</Text>
             <Text style={styles.farmerInfoText}>
-              📍 {getSelectedFarmer()?.ubicacion}
+              👤 {getSelectedFarmer()?.name}
             </Text>
+            {getSelectedFarmer()?.email && (
+              <Text style={styles.farmerInfoText}>
+                📧 {getSelectedFarmer()?.email}
+              </Text>
+            )}
+            {getSelectedFarmer()?.ubicacion && (
+              <Text style={styles.farmerInfoText}>
+                📍 {getSelectedFarmer()?.ubicacion}
+              </Text>
+            )}
+            {getSelectedFarmer()?.cultivo && (
+              <Text style={styles.farmerInfoText}>
+                🌱 {getSelectedFarmer()?.cultivo}
+              </Text>
+            )}
             <Text style={styles.farmerInfoText}>
-              🌱 {getSelectedFarmer()?.cultivo}
+              📊 Cultivos activos: {crops.length}
             </Text>
           </View>
         )}
 
-        {/* Selección de Cultivo (Opcional) */}
+        {/* Selección de Cultivo - SIMPLIFICADO */}
         <View style={styles.formGroup}>
-          <Text style={styles.label}>🌱 Cultivo Específico (Opcional)</Text>
+          <Text style={styles.label}>🌱 Cultivo Específico</Text>
           <ScrollView 
             horizontal 
             showsHorizontalScrollIndicator={false}
             style={styles.cropScroll}
           >
-            <TouchableOpacity
-              style={[
-                styles.cropOption,
-                selectedCrop === '' && styles.cropOptionSelected
-              ]}
-              onPress={() => setSelectedCrop('')}
-            >
-              <Text style={[
-                styles.cropOptionText,
-                selectedCrop === '' && styles.cropOptionTextSelected
-              ]}>
-                Todos los cultivos
-              </Text>
-            </TouchableOpacity>
             {crops.map((crop) => (
               <TouchableOpacity
                 key={crop._id}
@@ -185,12 +188,19 @@ const handleSubmitRecommendation = async () => {
                   styles.cropOptionText,
                   selectedCrop === crop._id && styles.cropOptionTextSelected
                 ]}>
-                  {crop.crop}
+                  {crop.crop || 'Cultivo'}
                 </Text>
-                <Text style={styles.cropOptionLocation}>{crop.location}</Text>
+                <Text style={styles.cropOptionLocation}>
+                  {crop.location || 'Ubicación no especificada'}
+                </Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
+          {crops.length === 0 && selectedFarmer && (
+            <Text style={styles.noCropsText}>
+              Este agricultor no tiene cultivos registrados
+            </Text>
+          )}
         </View>
 
         {/* Prioridad */}
@@ -244,10 +254,10 @@ Ejemplo: 'Regar mañana a las 6 am cuando la temperatura sea más baja'
         {/* Ejemplos de Recomendaciones */}
         <View style={styles.examplesSection}>
           <Text style={styles.examplesTitle}>💡 Ejemplos de Recomendaciones:</Text>
-          <Text style={styles.example}>• "Regar mañana a las 6:00 AM"</Text>
-          <Text style={styles.example}>• "Aplicar fertilizante nitrogenado"</Text>
-          <Text style={styles.example}>• "Revisar sistema de riego"</Text>
-          <Text style={styles.example}>• "Cosechar en 2 semanas"</Text>
+          <Text style={styles.example}>• "Regar mañana a las 6:00 AM cuando la temperatura sea más baja"</Text>
+          <Text style={styles.example}>• "Aplicar fertilizante nitrogenado en los próximos 3 días"</Text>
+          <Text style={styles.example}>• "Revisar sistema de riego por posible obstrucción"</Text>
+          <Text style={styles.example}>• "Programar cosecha para dentro de 2 semanas"</Text>
         </View>
 
         {/* Botón de Envío */}
@@ -337,14 +347,22 @@ const styles = StyleSheet.create({
   },
   farmerInfo: {
     backgroundColor: '#f3e5f5',
-    padding: 12,
+    padding: 16,
     borderRadius: 8,
     marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#7b1fa2',
+  },
+  farmerInfoTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#7b1fa2',
+    marginBottom: 8,
   },
   farmerInfoText: {
     fontSize: 14,
     color: '#7b1fa2',
-    marginBottom: 2,
+    marginBottom: 4,
   },
   cropScroll: {
     marginHorizontal: -16,
@@ -379,6 +397,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#666',
     marginTop: 2,
+  },
+  noCropsText: {
+    fontSize: 14,
+    color: '#666',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 8,
   },
   priorityOptions: {
     flexDirection: 'row',

@@ -94,54 +94,54 @@ export default function History() {
 
   // 🔄 FUNCIÓN AUXILIAR: Extraer acciones de cultivos (MEJORADA)
   const extractActionsFromCrops = (crops) => {
-    const allActions = [];
+  const allActions = [];
+  
+  crops.forEach(crop => {
+    const cropId = crop._id || crop.id;
+    const isWebProject = crop.isWebProject || true; // Ahora todo viene de projects
+    const isLocal = crop._source === 'local' || crop.synced === false;
+    const cropName = crop.crop || 'Cultivo no especificado';
+    const location = crop.location || 'Ubicación no especificada';
     
-    crops.forEach(crop => {
-      const cropId = crop._id || crop.id;
-      const isWebProject = crop.isWebProject || false;
-      const isLocal = crop._source === 'local' || crop.synced === false;
-      const cropName = crop.crop || 'Cultivo no especificado';
-      const location = crop.location || 'Ubicación no especificada';
-      
-      if (crop.history && Array.isArray(crop.history)) {
-        crop.history.forEach((action, actionIndex) => {
-          const actionId = action._id || action.id || `${cropId}-${action.date}-${actionIndex}`;
-          
-          allActions.push({
-            ...action,
-            id: actionId,
-            _id: action._id || actionId,
-            cropId: cropId,
-            cropName: cropName,
+    if (crop.history && Array.isArray(crop.history)) {
+      crop.history.forEach((action, actionIndex) => {
+        const actionId = action._id || action.id || `${cropId}-${action.date}-${actionIndex}`;
+        
+        allActions.push({
+          ...action,
+          id: actionId,
+          _id: action._id || actionId,
+          cropId: cropId,
+          cropName: cropName,
+          location: location,
+          _source: isLocal ? 'local' : 'web', // Ahora todo es web o local
+          synced: crop.synced !== false && action.synced !== false,
+          isLegacy: crop.isLegacy || false,
+          isWebAction: true, // Todas las acciones vienen de la web
+          isWebProject: true, // Todos los proyectos son web
+          isLocal: isLocal,
+          cropData: {
+            crop: cropName,
             location: location,
-            _source: isLocal ? 'local' : (isWebProject ? 'web' : 'cloud'),
-            synced: crop.synced !== false && action.synced !== false,
+            status: crop.status,
+            humidity: crop.humidity,
+            bioFertilizer: crop.bioFertilizer,
+            observations: crop.observations,
+            recommendations: crop.recommendations,
             isLegacy: crop.isLegacy || false,
-            isWebAction: action.isWebAction || false,
-            isWebProject: isWebProject,
-            isLocal: isLocal,
-            cropData: {
-              crop: cropName,
-              location: location,
-              status: crop.status,
-              humidity: crop.humidity,
-              bioFertilizer: crop.bioFertilizer,
-              observations: crop.observations,
-              recommendations: crop.recommendations,
-              isLegacy: crop.isLegacy || false,
-              isWebProject: isWebProject,
-              isWebAction: action.isWebAction || false,
-              isLocal: isLocal
-            }
-          });
+            isWebProject: true,
+            isWebAction: true,
+            isLocal: isLocal
+          }
         });
-      } else {
-        console.log('⚠️ Cultivo sin historial:', cropId, cropName);
-      }
-    });
-    
-    return allActions;
-  };
+      });
+    } else {
+      console.log('⚠️ Cultivo sin historial:', cropId, cropName);
+    }
+  });
+  
+  return allActions;
+};
 
   // 🗑️ FUNCIÓN PARA ELIMINAR ACCIÓN
   const handleDeleteAction = async (action) => {
@@ -264,7 +264,7 @@ export default function History() {
       let mongoCrops = [];
       if (user && user.id && isConnected) {
         try {
-          const response = await fetch(`${API_BASE_URL}/crops`, {
+          const response = await fetch(`${API_BASE_URL}/farmer/crops`, {
             headers: { 'Authorization': user.id }
           });
           if (response.ok) {
