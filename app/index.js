@@ -64,60 +64,11 @@ export default function LoginScreen() {
       console.log('❌ Error en login:', error);
       Alert.alert(
         'Error de Conexión', 
-        'No se pudo conectar al servidor. Verifica:\n\n1. Que el servidor esté ejecutándose\n2. Que la IP sea correcta\n3. Que estés en la misma red WiFi',
-        [
-          { 
-            text: 'Usar Modo Demo', 
-            onPress: handleDemoLogin 
-          },
-          { 
-            text: 'Reintentar', 
-            style: 'cancel' 
-          }
-        ]
+        'No se pudo conectar al servidor. Verifica tu conexión a internet y que el servidor esté disponible.'
       );
     } finally {
       setLoading(false);
     }
-  };
-
-  // 🔄 FUNCIÓN PARA MODO DEMO (cuando el servidor no está disponible)
-  const handleDemoLogin = async () => {
-    console.log('🚀 Iniciando sesión demo...');
-    
-    const usuarioDemo = {
-      id: "demo-user-id",
-      name: "Usuario Demo",
-      email: "demo@agricola.com",
-      role: "farmer",
-      cultivo: "Maíz Demo",
-      ubicacion: "Ejido Demo"
-    };
-
-    try {
-      await AsyncStorage.removeItem('user');
-      await AsyncStorage.removeItem('localActions');
-      await AsyncStorage.removeItem('localCrops');
-
-      await saveUser(usuarioDemo);
-
-      console.log('✅ Sesión demo iniciada');
-      Alert.alert('Modo Demo', 'Sesión demo iniciada correctamente');
-      router.replace('/farmer/home-farmer');
-    } catch (error) {
-      console.log('❌ Error en demo login:', error);
-      Alert.alert('Error', 'No se pudo iniciar sesión demo');
-    }
-  };
-
-  // 🔄 FUNCIÓN PARA PRUEBA RÁPIDA
-  const handleQuickTest = () => {
-    setEmail('demo@demo.com');
-    setPassword('demo');
-    Alert.alert(
-      'Datos de Prueba',
-      'Se han llenado los campos con credenciales de demo. Presiona "Iniciar Sesión" para continuar.'
-    );
   };
 
   return (
@@ -153,36 +104,9 @@ export default function LoginScreen() {
         </Text>
       </TouchableOpacity>
 
-      {/* BOTONES ADICIONALES PARA PRUEBAS */}
-      <View style={styles.testButtonsContainer}>
-        <TouchableOpacity 
-          style={styles.demoButton} 
-          onPress={handleDemoLogin}
-        >
-          <Text style={styles.demoButtonText}>🚀 Usar Modo Demo</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.testButton} 
-          onPress={handleQuickTest}
-        >
-          <Text style={styles.testButtonText}>🧪 Llenar Datos Prueba</Text>
-        </TouchableOpacity>
-      </View>
-
       <TouchableOpacity onPress={() => router.push('/registro')} style={styles.linkButton}>
         <Text style={styles.linkText}>¿No tienes cuenta? Regístrate</Text>
       </TouchableOpacity>
-
-      {/* INFO DE CONEXIÓN */}
-      <View style={styles.infoContainer}>
-        <Text style={styles.infoText}>
-          📡 Servidor: {API_BASE_URL}
-        </Text>
-        <Text style={styles.infoHint}>
-          Si hay problemas de conexión, usa "Modo Demo"
-        </Text>
-      </View>
     </View>
   );
 }
@@ -231,32 +155,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
-  testButtonsContainer: {
-    marginTop: 15,
-    gap: 10,
-  },
-  demoButton: {
-    backgroundColor: '#2196f3',
-    padding: 12,
-    borderRadius: 10,
-  },
-  demoButtonText: {
-    color: 'white',
-    textAlign: 'center',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  testButton: {
-    backgroundColor: '#ff9800',
-    padding: 12,
-    borderRadius: 10,
-  },
-  testButtonText: {
-    color: 'white',
-    textAlign: 'center',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
   linkButton: {
     padding: 10,
     marginTop: 20,
@@ -265,25 +163,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#4caf50',
     fontSize: 16,
-  },
-  infoContainer: {
-    marginTop: 30,
-    padding: 10,
-    backgroundColor: '#e3f2fd',
-    borderRadius: 8,
-    borderLeftWidth: 4,
-    borderLeftColor: '#2196f3',
-  },
-  infoText: {
-    fontSize: 12,
-    color: '#1976d2',
-    textAlign: 'center',
-    marginBottom: 5,
-  },
-  infoHint: {
-    fontSize: 11,
-    color: '#666',
-    textAlign: 'center',
-    fontStyle: 'italic',
   },
 });

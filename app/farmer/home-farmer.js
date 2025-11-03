@@ -1,4 +1,4 @@
-// app/farmer/home-farmer.js - VERSIÓN CON ÚLTIMA RECOMENDACIÓN NO CLICABLE
+// app/farmer/home-farmer.js - VERSIÓN CON ESTILO DE SENSOR CONNECTION
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
@@ -173,84 +173,91 @@ export default function HomeFarmer() {
       contentContainerStyle={styles.contentContainer}
       showsVerticalScrollIndicator={true}
     >
-      {/* 🔹 Header */}
+      {/* 🔹 Header - Mismo estilo que Sensor Connection */}
       <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <Text style={styles.title}>👨‍🌾 Panel del Agricultor</Text>
-          <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-            <Text style={styles.logoutText}>🚪 Salir</Text>
-          </TouchableOpacity>
-        </View>
-
+        <Text style={styles.title}>👨‍🌾 Panel del Agricultor</Text>
         <Text style={styles.subtitle}>
           {user ? `Bienvenido, ${user.name}` : 'Bienvenido agricultor'}
         </Text>
+      </View>
+
+      {/* Información de conexión - Mismo estilo que Sensor Connection */}
+      <View style={styles.connectionInfo}>
+        <View style={styles.connectionStatus}>
+          <View style={[styles.statusDot, isConnected ? styles.statusOnline : styles.statusOffline]} />
+          <Text style={styles.statusText}>
+            {isConnected ? 'Conectado' : 'Sin conexión'}
+          </Text>
+        </View>
         
-        {/* Estado de conexión y sincronización */}
-        <View style={styles.statusContainer}>
-          <View style={[styles.connectionBadge, { backgroundColor: isConnected ? '#4caf50' : '#ff9800' }]}>
-            <Text style={styles.connectionText}>
-              {isConnected ? 'En línea' : 'Sin conexión'}
-            </Text>
+        {unsyncedCount > 0 && (
+          <Text style={styles.unsyncedText}>
+            📱 {unsyncedCount} pendientes
+          </Text>
+        )}
+      </View>
+
+      {/* Tarjeta principal de estado - Mismo estilo que Sensor Connection */}
+      <View style={styles.mainCard}>
+        <View style={styles.cardHeader}>
+          <View style={styles.cardTitleContainer}>
+            <Text style={styles.cardIcon}>📊</Text>
+            <View style={styles.cardTitleText}>
+              <Text style={styles.cardName}>Estado del Sistema</Text>
+              <Text style={styles.cardSubtitle}>
+                Información general de la aplicación
+              </Text>
+            </View>
           </View>
           
-          {unsyncedCount > 0 && (
-            <View style={styles.syncBadge}>
-              <Text style={styles.syncText}>
-                📱 {unsyncedCount} pendientes
-              </Text>
-            </View>
-          )}
+          <View style={[styles.statusBadge, { backgroundColor: isConnected ? '#4caf50' : '#ff9800' }]}>
+            <Text style={styles.statusText}>
+              {isConnected ? '✅ En línea' : '⚠️ Offline'}
+            </Text>
+          </View>
         </View>
-      </View>
 
-      {/* Información de estado */}
-      <View style={styles.infoSection}>
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>📊 Estado del Sistema</Text>
-          <View style={styles.infoContent}>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Conexión:</Text>
-              <Text style={[styles.infoValue, { color: isConnected ? '#4caf50' : '#ff9800' }]}>
-                {isConnected ? 'En línea' : 'Sin conexión'}
-              </Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Recomendaciones:</Text>
-              <Text style={styles.infoValue}>
-                {recommendations.length} recibidas
-              </Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Acciones pendientes:</Text>
-              <Text style={[styles.infoValue, { color: unsyncedCount > 0 ? '#ff9800' : '#4caf50' }]}>
-                {unsyncedCount} por sincronizar
-              </Text>
-            </View>
+        <View style={styles.cardDetails}>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Usuario:</Text>
+            <Text style={styles.detailValue}>
+              {user?.name || 'No identificado'}
+            </Text>
+          </View>
+
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Email:</Text>
+            <Text style={styles.detailValue}>
+              {user?.email || 'No disponible'}
+            </Text>
           </View>
         </View>
       </View>
 
-      {/* 🔄 SECCIÓN DE RECOMENDACIONES */}
+      {/* SECCIÓN DE RECOMENDACIONES - Mismo estilo de tarjetas */}
       <View style={styles.recommendationsSection}>
         <Text style={styles.sectionTitle}>💡 Recomendaciones del Científico</Text>
         
         {/* Última recomendación - NO ES UN BOTÓN */}
-        <View style={styles.lastRecommendationCard}>
-          <View style={styles.recommendationHeader}>
-            <Text style={styles.recommendationIcon}>📢</Text>
-            <View style={styles.recommendationTextContainer}>
-              <Text style={styles.recommendationTitle}>
-                {lastRecommendation ? 'Última Recomendación' : 'Sin Recomendaciones'}
-              </Text>
-              <Text style={styles.recommendationSubtitle}>
-                {lastRecommendation 
-                  ? `De: ${lastRecommendation.from}` 
-                  : 'No hay recomendaciones recientes'}
-              </Text>
+        <View style={styles.recommendationCard}>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleContainer}>
+              <Text style={styles.cardIcon}>📢</Text>
+              <View style={styles.cardTitleText}>
+                <Text style={styles.cardName}>
+                  {lastRecommendation ? 'Última Recomendación' : 'Sin Recomendaciones'}
+                </Text>
+                <Text style={styles.cardSubtitle}>
+                  {lastRecommendation 
+                    ? `De: ${lastRecommendation.from}` 
+                    : 'No hay recomendaciones recientes'}
+                </Text>
+              </View>
             </View>
             {lastRecommendation && !lastRecommendation.read && (
-              <View style={styles.unreadBadge} />
+              <View style={[styles.statusBadge, { backgroundColor: '#f44336' }]}>
+                <Text style={styles.statusText}>Nuevo</Text>
+              </View>
             )}
           </View>
           
@@ -279,76 +286,124 @@ export default function HomeFarmer() {
 
         {/* Botón para ver todas las recomendaciones */}
         <TouchableOpacity 
-          style={styles.allRecommendationsButton}
+          style={styles.actionButton}
           onPress={() => router.push('/farmer/alerts')}
         >
-          <Text style={styles.allRecommendationsIcon}>📋</Text>
-          <View style={styles.allRecommendationsTextContainer}>
-            <Text style={styles.allRecommendationsTitle}>Ver Todas las Recomendaciones</Text>
-            <Text style={styles.allRecommendationsSubtitle}>
-              {recommendations.length} recomendaciones en total
-            </Text>
-          </View>
-          <Text style={styles.menuArrow}>›</Text>
+          <Text style={styles.actionButtonText}>📋 Ver Todas las Recomendaciones</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Menú principal */}
+      {/* Menú principal - Mismo estilo de tarjetas */}
       <View style={styles.menuSection}>
-        <Text style={styles.menuTitle}>Acciones Rápidas</Text>
+        <Text style={styles.sectionTitle}>🚀 Acciones Rápidas</Text>
         
         <TouchableOpacity 
-          style={styles.menuButton}
+          style={styles.menuCard}
           onPress={() => router.push('/farmer/sensor-connection')}
         >
-          <Text style={styles.menuIcon}>📡</Text>
-          <View style={styles.menuTextContainer}>
-            <Text style={styles.menuText}>Conectar Sensor</Text>
-            <Text style={styles.menuSubtext}>Arduino Bluetooth</Text>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleContainer}>
+              <Text style={styles.cardIcon}>📡</Text>
+              <View style={styles.cardTitleText}>
+                <Text style={styles.cardName}>Conectar Sensor</Text>
+                <Text style={styles.cardSubtitle}>Arduino Bluetooth</Text>
+              </View>
+            </View>
+            <Text style={styles.menuArrow}>›</Text>
           </View>
-          <Text style={styles.menuArrow}>›</Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
-          style={styles.menuButton}
+          style={styles.menuCard}
           onPress={() => router.push('/farmer/action-register')}
         >
-          <Text style={styles.menuIcon}>📝</Text>
-          <View style={styles.menuTextContainer}>
-            <Text style={styles.menuText}>Registrar Acción</Text>
-            <Text style={styles.menuSubtext}>Nueva actividad agrícola</Text>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleContainer}>
+              <Text style={styles.cardIcon}>📝</Text>
+              <View style={styles.cardTitleText}>
+                <Text style={styles.cardName}>Registrar Acción</Text>
+                <Text style={styles.cardSubtitle}>Nueva actividad agrícola</Text>
+              </View>
+            </View>
+            <View style={styles.menuRightContent}>
+              {unsyncedCount > 0 && <View style={styles.pendingDot} />}
+              <Text style={styles.menuArrow}>›</Text>
+            </View>
           </View>
-          {unsyncedCount > 0 && <View style={styles.pendingDot} />}
-          <Text style={styles.menuArrow}>›</Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
-          style={styles.menuButton}
+          style={styles.menuCard}
           onPress={() => router.push('/farmer/history')}
         >
-          <Text style={styles.menuIcon}>📊</Text>
-          <View style={styles.menuTextContainer}>
-            <Text style={styles.menuText}>Historial Completo</Text>
-            <Text style={styles.menuSubtext}>Ver todas las acciones</Text>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleContainer}>
+              <Text style={styles.cardIcon}>📊</Text>
+              <View style={styles.cardTitleText}>
+                <Text style={styles.cardName}>Historial de Acciones</Text>
+                <Text style={styles.cardSubtitle}>Ver todas las actividades</Text>
+              </View>
+            </View>
+            <Text style={styles.menuArrow}>›</Text>
           </View>
-          <Text style={styles.menuArrow}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.menuCard}
+          onPress={() => router.push('/farmer/crops-list')}
+        >
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleContainer}>
+              <Text style={styles.cardIcon}>🌱</Text>
+              <View style={styles.cardTitleText}>
+                <Text style={styles.cardName}>Mis Cultivos</Text>
+                <Text style={styles.cardSubtitle}>Gestionar todos mis cultivos</Text>
+              </View>
+            </View>
+            <Text style={styles.menuArrow}>›</Text>
+          </View>
         </TouchableOpacity>
       </View>
 
-      {/* Información adicional */}
+      {/* Información adicional - Mismo estilo de tarjetas */}
       <View style={styles.helpSection}>
-        <Text style={styles.helpTitle}>💡 Información sobre la app</Text>
-        <Text style={styles.helpText}>
-          • Los datos se sincronizan automaticamente al tener wifi{'\n'}
-          • Las acciones offline se guardan localmente{'\n'}
-          • Los datos locales se deben sincronizar de manera manual{'\n'}
-          • Los datos web aparecen automáticamente al tener wifi{'\n'}
-          • El punto naranja indica sin conexión
-        </Text>
+        <View style={styles.helpCard}>
+          <Text style={styles.helpTitle}>💡 Información sobre la app</Text>
+          <View style={styles.helpList}>
+            <View style={styles.helpItem}>
+              <Text style={styles.helpIcon}>•</Text>
+              <Text style={styles.helpText}>Los datos se sincronizan automáticamente al tener wifi</Text>
+            </View>
+            <View style={styles.helpItem}>
+              <Text style={styles.helpIcon}>•</Text>
+              <Text style={styles.helpText}>Las acciones offline se guardan localmente</Text>
+            </View>
+            <View style={styles.helpItem}>
+              <Text style={styles.helpIcon}>•</Text>
+              <Text style={styles.helpText}>Los datos locales se deben sincronizar de manera manual</Text>
+            </View>
+            <View style={styles.helpItem}>
+              <Text style={styles.helpIcon}>•</Text>
+              <Text style={styles.helpText}>Los datos web aparecen automáticamente al tener wifi</Text>
+            </View>
+            <View style={styles.helpItem}>
+              <Text style={styles.helpIcon}>•</Text>
+              <Text style={styles.helpText}>El punto naranja indica sin conexión</Text>
+            </View>
+          </View>
+        </View>
       </View>
 
+      {/* Botón de cerrar sesión */}
+      <TouchableOpacity 
+        style={styles.logoutButton}
+        onPress={handleLogout}
+      >
+        <Text style={styles.logoutButtonText}>🚪 Cerrar Sesión</Text>
+      </TouchableOpacity>
+
       {/* 🔽 ESPACIO EN BLANCO PARA SCROLL ADICIONAL */}
-      <View style={styles.bottomSpace} />
+      <View style={styles.bottomSpacing} />
       
     </ScrollView>
   );
@@ -360,110 +415,147 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
   },
   contentContainer: {
-    flexGrow: 1,
+    padding: 16,
+    paddingBottom: 60,
   },
+  // 🔹 HEADER - Mismo estilo que Sensor Connection
   header: {
     backgroundColor: '#2e7d32',
     padding: 20,
-    paddingTop: 50,
-    alignItems: 'center',
-  },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    width: '100%',
-    marginBottom: 10,
+    borderRadius: 12,
+    marginBottom: 16,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     color: 'white',
-    flex: 1,
     textAlign: 'center',
+    marginBottom: 4,
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 14,
     color: 'white',
     textAlign: 'center',
-    marginTop: 5,
     opacity: 0.9,
   },
-  statusContainer: {
+  // 🔹 INFORMACIÓN DE CONEXIÓN - Mismo estilo que Sensor Connection
+  connectionInfo: {
     flexDirection: 'row',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 10,
-    gap: 10,
+    backgroundColor: 'white',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
   },
-  connectionBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 15,
+  connectionStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  connectionText: {
-    color: 'white',
-    fontWeight: 'bold',
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  statusOnline: {
+    backgroundColor: '#4caf50',
+  },
+  statusOffline: {
+    backgroundColor: '#f44336',
+  },
+  statusText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  unsyncedText: {
     fontSize: 12,
+    color: '#ff9800',
+    fontWeight: '500',
   },
-  syncBadge: {
-    backgroundColor: '#ff9800',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 15,
-  },
-  syncText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 12,
-  },
-  infoSection: {
-    padding: 16,
-  },
-  infoCard: {
+  // 🔹 TARJETAS PRINCIPALES - Mismo estilo que Sensor Connection
+  mainCard: {
     backgroundColor: 'white',
     padding: 16,
     borderRadius: 12,
+    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  infoTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
-  },
-  infoContent: {
-    gap: 8,
-  },
-  infoRow: {
+  cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    marginBottom: 16,
   },
-  infoLabel: {
+  cardTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    flex: 1,
+    marginRight: 8,
+  },
+  cardIcon: {
+    fontSize: 24,
+    marginRight: 12,
+    marginTop: 2,
+  },
+  cardTitleText: {
+    flex: 1,
+  },
+  cardName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 2,
+  },
+  cardSubtitle: {
     fontSize: 14,
     color: '#666',
   },
-  infoValue: {
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  cardDetails: {
+    marginBottom: 16,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  detailLabel: {
     fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  detailValue: {
+    fontSize: 14,
+    color: '#333',
     fontWeight: '600',
   },
-  // 🔄 ESTILOS PARA RECOMENDACIONES
+  // 🔹 SECCIONES
   recommendationsSection: {
-    padding: 16,
+    marginBottom: 16,
+  },
+  menuSection: {
+    marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  // ÚLTIMA RECOMENDACIÓN - NO CLICABLE
-  lastRecommendationCard: {
+  // 🔹 TARJETA DE RECOMENDACIÓN
+  recommendationCard: {
     backgroundColor: 'white',
     padding: 16,
     borderRadius: 12,
@@ -476,34 +568,6 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#2196f3',
   },
-  recommendationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  recommendationIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  recommendationTextContainer: {
-    flex: 1,
-  },
-  recommendationTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  recommendationSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 2,
-  },
-  unreadBadge: {
-    width: 8,
-    height: 8,
-    backgroundColor: '#f44336',
-    borderRadius: 4,
-  },
   recommendationContent: {
     marginTop: 8,
   },
@@ -512,7 +576,6 @@ const styles = StyleSheet.create({
     color: '#555',
     lineHeight: 20,
     marginBottom: 12,
-    textAlign: 'left',
   },
   recommendationDate: {
     fontSize: 12,
@@ -530,117 +593,99 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontStyle: 'italic',
   },
-  // BOTÓN PARA VER TODAS LAS RECOMENDACIONES
-  allRecommendationsButton: {
+  // 🔹 BOTONES DE ACCIÓN
+  actionButton: {
+    backgroundColor: '#4caf50',
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  actionButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  // 🔹 TARJETAS DE MENÚ
+  menuCard: {
     backgroundColor: 'white',
     padding: 16,
     borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  allRecommendationsIcon: {
-    fontSize: 24,
-    marginRight: 12,
+  menuRightContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  allRecommendationsTextContainer: {
-    flex: 1,
-  },
-  allRecommendationsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  allRecommendationsSubtitle: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
+  pendingDot: {
+    width: 8,
+    height: 8,
+    backgroundColor: '#ff9800',
+    borderRadius: 4,
+    marginRight: 8,
   },
   menuArrow: {
     fontSize: 20,
     color: '#666',
     fontWeight: 'bold',
   },
-  menuSection: {
-    padding: 16,
-  },
-  menuTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
+  // 🔹 SECCIÓN DE AYUDA
+  helpSection: {
     marginBottom: 16,
   },
-  menuButton: {
+  helpCard: {
     backgroundColor: 'white',
     padding: 16,
     borderRadius: 12,
-    marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    position: 'relative',
-  },
-  menuIcon: {
-    fontSize: 28,
-    marginRight: 15,
-  },
-  menuTextContainer: {
-    flex: 1,
-  },
-  menuText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  menuSubtext: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
-  pendingDot: {
-    position: 'absolute',
-    top: 12,
-    right: 35,
-    width: 8,
-    height: 8,
-    backgroundColor: '#ff9800',
-    borderRadius: 4,
-  },
-  helpSection: {
-    padding: 16,
-    marginTop: 8,
   },
   helpTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 8,
+    marginBottom: 12,
+  },
+  helpList: {
+    gap: 8,
+  },
+  helpItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  helpIcon: {
+    marginRight: 8,
+    fontSize: 14,
+    color: '#666',
   },
   helpText: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#666',
-    lineHeight: 18,
+    flex: 1,
+    lineHeight: 20,
   },
-  bottomSpace: {
-    height: 80,
+  // 🔹 BOTÓN DE CERRAR SESIÓN
+  logoutButton: {
+    backgroundColor: '#dc2626',
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 16,
   },
-  logoutText: { 
-    color: 'white', 
-    fontWeight: 'bold', 
-    fontSize: 14 
+  logoutButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
-  logoutButton: { 
-    backgroundColor: '#c62828', 
-    paddingHorizontal: 10, 
-    paddingVertical: 5, 
-    borderRadius: 8 
+  // 🔹 ESPACIO AL FINAL
+  bottomSpacing: {
+    height: 40,
   },
 });

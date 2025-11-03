@@ -1,4 +1,4 @@
-// app/scientist/reports.js - VERSIÓN ACTUALIZADA SOLO FARMERS
+// app/scientist/reports.js - VERSIÓN CON ESTILO DE HOME SCIENTIST
 import React, { useState, useEffect } from 'react';
 import { 
   View, 
@@ -8,7 +8,8 @@ import {
   Alert, 
   Dimensions,
   ActivityIndicator,
-  RefreshControl 
+  RefreshControl,
+  TouchableOpacity 
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSync } from '../../contexts/SyncContext';
@@ -112,7 +113,7 @@ const FarmersRankingChart = ({ data, title }) => {
   );
 };
 
-// 🔥 Componente para Biofertilizantes - MANTENIDO IGUAL
+// 🔥 Componente para Biofertilizantes
 const BiofertilizerChart = ({ data, title }) => {
   const [ChartComponent, setChartComponent] = useState(null);
   const [error, setError] = useState(false);
@@ -209,12 +210,16 @@ const BiofertilizerChart = ({ data, title }) => {
   );
 };
 
-// Componente de tarjeta de estadística
+// Componente de tarjeta de estadística - ACTUALIZADO CON ESTILO HOME SCIENTIST
 const StatCard = ({ title, value, subtitle, color = '#7b1fa2' }) => (
-  <View style={[styles.statCard, { borderLeftColor: color }]}>
-    <Text style={styles.statValue}>{value}</Text>
-    <Text style={styles.statTitle}>{title}</Text>
-    {subtitle && <Text style={styles.statSubtitle}>{subtitle}</Text>}
+  <View style={styles.statCard}>
+    <View style={styles.statContent}>
+      <Text style={styles.statIcon}>📊</Text>
+      <View style={styles.statTextContainer}>
+        <Text style={styles.statNumber}>{value}</Text>
+        <Text style={styles.statLabel} numberOfLines={2}>{title}</Text>
+      </View>
+    </View>
   </View>
 );
 
@@ -223,7 +228,14 @@ export default function Reports() {
   const [biofertilizerData, setBiofertilizerData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { user } = useSync();
+  
+  // 🔹 Usar el contexto global - Mismo estilo que Home Scientist
+  const { 
+    isConnected, 
+    isSyncing, 
+    unsyncedCount, 
+    user 
+  } = useSync();
 
   useEffect(() => {
     loadGlobalStats();
@@ -376,7 +388,7 @@ export default function Reports() {
   if (loading && !refreshing) {
     return (
       <View style={styles.loadingScreen}>
-        <ActivityIndicator size="large" color="#2196f3" />
+        <ActivityIndicator size="large" color="#7b1fa2" />
         <Text style={styles.loadingText}>Cargando reportes...</Text>
       </View>
     );
@@ -385,98 +397,112 @@ export default function Reports() {
   return (
     <ScrollView 
       style={styles.container}
+      contentContainerStyle={styles.contentContainer}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
       }
+      showsVerticalScrollIndicator={true}
     >
+      {/* 🔹 Header - Mismo estilo que Home Scientist */}
       <View style={styles.header}>
         <Text style={styles.title}>📊 Reportes y Estadísticas</Text>
-        <Text style={styles.subtitle}>Análisis global de datos agrícolas</Text>
+        <Text style={styles.subtitle}>
+          Análisis global de datos agrícolas
+        </Text>
       </View>
 
-      <View style={styles.content}>
-        {/* Estadísticas Rápidas */}
-        <View style={styles.quickStats}>
-          <Text style={styles.sectionTitle}>📈 Resumen General</Text>
-          <View style={styles.statsGrid}>
-            <StatCard 
-              title="Agricultores" 
-              value={rankingData.length}
-              color="#4caf50"
-            />
-            <StatCard 
-              title="Biofertilizantes" 
-              value={biofertilizerData.length}
-              color="#2196f3"
-            />
-            <StatCard 
-              title="Proyectos Totales" 
-              value={rankingData.reduce((sum, item) => sum + (item.totalProyectos || 0), 0)}
-              color="#ff9800"
-            />
-          </View>
+      {/* 🔹 Información de conexión - Mismo estilo que Home Scientist */}
+      <View style={styles.connectionInfo}>
+        <View style={styles.connectionStatus}>
+          <View style={[styles.statusDot, isConnected ? styles.statusOnline : styles.statusOffline]} />
+          <Text style={styles.statusText}>
+            {isConnected ? 'Conectado' : 'Sin conexión'}
+          </Text>
         </View>
+        
+        {unsyncedCount > 0 && (
+          <Text style={styles.unsyncedText}>
+            📱 {unsyncedCount} pendientes
+          </Text>
+        )}
+      </View>
 
+      {/* 🔹 Estadísticas rápidas - Mismo estilo que Home Scientist */}
+      <View style={styles.statsSection}>
+        <Text style={styles.sectionTitle}>📈 Resumen General</Text>
+        
+        <View style={styles.statsGrid}>
+          <StatCard 
+            title="Agricultores Analizados"
+            value={rankingData.length}
+          />
+          <StatCard 
+            title="Biofertilizantes"
+            value={biofertilizerData.length}
+          />
+          <StatCard 
+            title="Proyectos Totales"
+            value={rankingData.reduce((sum, item) => sum + (item.totalProyectos || 0), 0)}
+          />
+        </View>
+      </View>
+
+      {/* 🔹 Gráficas de Reportes */}
+      <View style={styles.chartsSection}>
+        <Text style={styles.sectionTitle}>📊 Gráficas de Análisis</Text>
+        
         {/* 📊 GRÁFICA: Ranking de Agricultores */}
         <FarmersRankingChart 
           data={rankingData}
-          title="🟩 Ranking de Agricultores"
+          title="🏆 Ranking de Agricultores"
         />
 
         {/* 📊 GRÁFICA: Comparativa de Biofertilizantes */}
         <BiofertilizerChart 
           data={biofertilizerData}
-          title="🥧 Uso de Biofertilizantes"
+          title="🧪 Uso de Biofertilizantes"
         />
+      </View>
 
-        {/* Información del Reporte */}
-        <View style={styles.reportInfo}>
-          <Text style={styles.reportInfoTitle}>📋 Información del Reporte</Text>
-          <Text style={styles.reportInfoText}>
-            • Agricultores analizados: {rankingData.length}
-          </Text>
-          <Text style={styles.reportInfoText}>
-            • Proyectos en ranking: {rankingData.reduce((sum, item) => sum + (item.totalProyectos || 0), 0)}
-          </Text>
-          <Text style={styles.reportInfoText}>
-            • Biofertilizantes registrados: {biofertilizerData.length}
-          </Text>
-          <Text style={styles.reportInfoText}>
-            • Fecha de generación: {new Date().toLocaleDateString('es-MX')}
-          </Text>
-          <Text style={styles.reportInfoText}>
-            • Estado: {loading ? 'Cargando...' : 'Completado'}
-          </Text>
+      {/* 🔹 Información adicional - Mismo estilo que Home Scientist */}
+      <View style={styles.helpSection}>
+        <View style={styles.helpCard}>
+          <Text style={styles.helpTitle}>💡 Información del Reporte</Text>
+          <View style={styles.helpList}>
+            <View style={styles.helpItem}>
+              <Text style={styles.helpIcon}>•</Text>
+              <Text style={styles.helpText}>Agricultores analizados: {rankingData.length}</Text>
+            </View>
+            <View style={styles.helpItem}>
+              <Text style={styles.helpIcon}>•</Text>
+              <Text style={styles.helpText}>Proyectos en ranking: {rankingData.reduce((sum, item) => sum + (item.totalProyectos || 0), 0)}</Text>
+            </View>
+            <View style={styles.helpItem}>
+              <Text style={styles.helpIcon}>•</Text>
+              <Text style={styles.helpText}>Biofertilizantes registrados: {biofertilizerData.length}</Text>
+            </View>
+            <View style={styles.helpItem}>
+              <Text style={styles.helpIcon}>•</Text>
+              <Text style={styles.helpText}>Fecha de generación: {new Date().toLocaleDateString('es-MX')}</Text>
+            </View>
+          </View>
         </View>
       </View>
+
+      {/* 🔽 ESPACIO EN BLANCO PARA SCROLL ADICIONAL */}
+      <View style={styles.bottomSpacing} />
     </ScrollView>
   );
 }
 
-// Los estilos se mantienen igual
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
-  header: {
-    backgroundColor: '#2196f3',
-    padding: 20,
-    paddingTop: 50,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: 'white',
-    opacity: 0.9,
-  },
-  content: {
+  contentContainer: {
     padding: 16,
+    paddingBottom: 60,
   },
   loadingScreen: {
     flex: 1,
@@ -489,55 +515,196 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 10,
   },
-  quickStats: {
-    marginBottom: 20,
+  // 🔹 HEADER - Mismo estilo que Home Scientist
+  header: {
+    backgroundColor: '#7b1fa2', // Color morado para científico
+    padding: 20,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: 'white',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: 'white',
+    textAlign: 'center',
+    opacity: 0.9,
+  },
+  // 🔹 INFORMACIÓN DE CONEXIÓN - Mismo estilo que Home Scientist
+  connectionInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  connectionStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  statusOnline: {
+    backgroundColor: '#4caf50',
+  },
+  statusOffline: {
+    backgroundColor: '#f44336',
+  },
+  statusText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  unsyncedText: {
+    fontSize: 12,
+    color: '#ff9800',
+    fontWeight: '500',
+  },
+  // 🔹 TARJETAS PRINCIPALES - Mismo estilo que Home Scientist
+  mainCard: {
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  cardTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    flex: 1,
+    marginRight: 8,
+  },
+  cardIcon: {
+    fontSize: 24,
+    marginRight: 12,
+    marginTop: 2,
+  },
+  cardTitleText: {
+    flex: 1,
+  },
+  cardName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 2,
+  },
+  cardSubtitle: {
+    fontSize: 14,
+    color: '#666',
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  cardDetails: {
+    marginBottom: 16,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  detailLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  detailValue: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+  },
+  // 🔹 SECCIONES
+  statsSection: {
+    marginBottom: 16,
+  },
+  chartsSection: {
+    marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 15,
+    marginBottom: 12,
   },
+  // 🔹 ESTADÍSTICAS - Mismo estilo que Home Scientist
   statsGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
-    marginBottom: 20,
-    gap: 10,
+    rowGap: 16, // 🔹 Espacio vertical entre filas
+    columnGap: 12, // 🔹 Espacio horizontal entre columnas
   },
   statCard: {
     flex: 1,
     backgroundColor: 'white',
-    padding: 15,
-    borderRadius: 8,
-    borderLeftWidth: 4,
+    padding: 16,
+    borderRadius: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 1,
+    shadowRadius: 4,
+    elevation: 3,
+    minHeight: 100,
+    marginHorizontal: 6, // 🔹 Espacio lateral
+    marginVertical: 6,   // 🔹 Espacio entre tarjetas verticalmente
   },
-  statValue: {
-    fontSize: 20,
+
+  statContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+  },
+  statIcon: {
+    fontSize: 32,
+    marginBottom: 8,
+  },
+  statTextContainer: {
+    alignItems: 'center',
+  },
+  statNumber: {
+    fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 5,
+    color: '#7b1fa2',
+    marginBottom: 4,
   },
-  statTitle: {
+  statLabel: {
     fontSize: 12,
     color: '#666',
-    fontWeight: '600',
+    textAlign: 'center',
+    fontWeight: '500',
+    lineHeight: 14,
   },
-  statSubtitle: {
-    fontSize: 10,
-    color: '#999',
-    marginTop: 2,
-  },
-  // Estilos para gráficas
+  // 🔹 GRÁFICAS
   chartContainer: {
     backgroundColor: 'white',
     borderRadius: 12,
-    padding: 15,
-    marginBottom: 20,
+    padding: 16,
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -648,33 +815,46 @@ const styles = StyleSheet.create({
   statItem: {
     alignItems: 'center',
   },
-  statNumber: {
-    fontSize: 16,
+  // 🔹 SECCIÓN DE AYUDA
+  helpSection: {
+    marginBottom: 16,
+  },
+  helpCard: {
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  helpTitle: {
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#2196f3',
+    color: '#333',
+    marginBottom: 12,
   },
-  statLabel: {
-    fontSize: 10,
-    color: '#6c757d',
-    marginTop: 2,
+  helpList: {
+    gap: 8,
   },
-  // Información del reporte
-  reportInfo: {
-    backgroundColor: '#e3f2fd',
-    padding: 15,
-    borderRadius: 8,
-    marginTop: 10,
-    marginBottom: 30,
+  helpItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
   },
-  reportInfoTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1976d2',
-    marginBottom: 10,
-  },
-  reportInfoText: {
+  helpIcon: {
+    marginRight: 8,
     fontSize: 14,
-    color: '#1976d2',
-    marginBottom: 4,
+    color: '#666',
+  },
+  helpText: {
+    fontSize: 14,
+    color: '#666',
+    flex: 1,
+    lineHeight: 20,
+  },
+  // 🔹 ESPACIO AL FINAL
+  bottomSpacing: {
+    height: 40,
   },
 });

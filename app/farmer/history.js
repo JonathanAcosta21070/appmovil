@@ -1,4 +1,4 @@
-// app/farmer/history.js - VERSIÓN COMPLETA CON OFFLINE
+// app/farmer/history.js - VERSIÓN CON ESTILO DE HOME FARMER
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, RefreshControl } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
@@ -13,33 +13,72 @@ export default function History() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [deletingActionId, setDeletingActionId] = useState(null);
+  const [actualPendingSyncCount, setActualPendingSyncCount] = useState(0);
   
   const { 
     user, 
     getUserCrops,
     API_BASE_URL,
     isConnected,
-    pendingSyncCount,
     syncPendingData,
-    deleteLocalCrop
+    getLocalCrops,
+    refreshCache,
+    loadCachedCrops,
+    checkPendingSync
   } = useSync();
 
   useFocusEffect(
     React.useCallback(() => {
       console.log('🎯 Pantalla de historial enfocada - cargando acciones...');
       loadActions();
+      checkPendingActions();
     }, [])
   );
 
   useEffect(() => {
-    loadActions();
-  }, []);
+    if (isConnected && actions.length > 0) {
+      console.log('🔄 Conexión restaurada - actualizando historial...');
+      refreshCache().then(() => {
+        loadActions(true);
+        checkPendingActions();
+      });
+    }
+  }, [isConnected]);
 
   useEffect(() => {
     filterActions();
   }, [actions, searchQuery, filterType]);
 
-  // 🔥 FUNCIÓN MEJORADA: Generar keys únicas
+  const checkPendingActions = async () => {
+    try {
+      console.log('🔍 Verificando datos pendientes de sincronización...');
+      
+      if (!user?.id) {
+        setActualPendingSyncCount(0);
+        return;
+      }
+
+      if (checkPendingSync) {
+        const pendingCount = await checkPendingSync();
+        setActualPendingSyncCount(pendingCount);
+        console.log('📊 Datos pendientes (desde contexto):', pendingCount);
+        return;
+      }
+
+      const localCrops = await getLocalCrops();
+      const unsyncedCrops = localCrops.filter(crop => 
+        crop.userId === user.id && !crop.synced
+      );
+      
+      setActualPendingSyncCount(unsyncedCrops.length);
+      console.log('📊 Datos pendientes (verificación manual):', unsyncedCrops.length);
+      
+    } catch (error) {
+      console.log('❌ Error verificando datos pendientes:', error);
+      setActualPendingSyncCount(0);
+    }
+  };
+
   const generateUniqueKey = (action, index) => {
     if (action._id) return action._id.toString();
     if (action.id) return action.id.toString();
@@ -49,8 +88,7 @@ export default function History() {
     return `${datePart}-${typePart}-${cropPart}-${index}`;
   };
 
-  // 🔄 FUNCIÓN PRINCIPAL MEJORADA: Cargar todas las acciones
-  const loadActions = async () => {
+  const loadActions = async (forceRefresh = false) => {
     try {
       setLoading(true);
       
@@ -61,8 +99,19 @@ export default function History() {
       
       if (user && user.id) {
         try {          
-          allCrops = await getUserCrops();
-          console.log('🌱 Datos cargados (app + web + locales):', allCrops.length);
+          if (forceRefresh) {
+            allCrops = await getUserCrops(false);
+            console.log('🌱 Datos cargados desde servidor:', allCrops.length);
+          } else {
+            const cachedData = await loadCachedCrops();
+            if (cachedData.length > 0) {
+              allCrops = cachedData;
+              console.log('📁 Datos cargados desde cache:', allCrops.length);
+            } else {
+              allCrops = await getUserCrops(false);
+              console.log('🌱 Datos cargados desde servidor:', allCrops.length);
+            }
+          }
           
         } catch (error) {
           console.log('❌ Error cargando cultivos:', error);
@@ -73,7 +122,6 @@ export default function History() {
       const allActions = extractActionsFromCrops(allCrops);
       console.log('📋 Acciones extraídas:', allActions.length);
 
-      // Ordenar por fecha (más recientes primero)
       const sortedActions = allActions.sort((a, b) => {
         const dateA = new Date(a.date || a.createdAt);
         const dateB = new Date(b.date || b.createdAt);
@@ -82,6 +130,8 @@ export default function History() {
 
       setActions(sortedActions);
       console.log('✅ Historial cargado:', sortedActions.length, 'acciones');
+
+      await checkPendingActions();
 
     } catch (error) {
       console.log('❌ Error cargando historial:', error);
@@ -92,73 +142,62 @@ export default function History() {
     }
   };
 
-  // 🔄 FUNCIÓN AUXILIAR: Extraer acciones de cultivos (MEJORADA)
   const extractActionsFromCrops = (crops) => {
-  const allActions = [];
-  
-  crops.forEach(crop => {
-    const cropId = crop._id || crop.id;
-    const isWebProject = crop.isWebProject || true; // Ahora todo viene de projects
-    const isLocal = crop._source === 'local' || crop.synced === false;
-    const cropName = crop.crop || 'Cultivo no especificado';
-    const location = crop.location || 'Ubicación no especificada';
+    const allActions = [];
     
-    if (crop.history && Array.isArray(crop.history)) {
-      crop.history.forEach((action, actionIndex) => {
-        const actionId = action._id || action.id || `${cropId}-${action.date}-${actionIndex}`;
-        
-        allActions.push({
-          ...action,
-          id: actionId,
-          _id: action._id || actionId,
-          cropId: cropId,
-          cropName: cropName,
-          location: location,
-          _source: isLocal ? 'local' : 'web', // Ahora todo es web o local
-          synced: crop.synced !== false && action.synced !== false,
-          isLegacy: crop.isLegacy || false,
-          isWebAction: true, // Todas las acciones vienen de la web
-          isWebProject: true, // Todos los proyectos son web
-          isLocal: isLocal,
-          cropData: {
-            crop: cropName,
+    crops.forEach(crop => {
+      const cropId = crop._id || crop.id;
+      const isLocal = crop._source === 'local' || crop.synced === false;
+      const cropName = crop.crop || 'Cultivo no especificado';
+      const location = crop.location || 'Ubicación no especificada';
+      
+      if (crop.history && Array.isArray(crop.history)) {
+        crop.history.forEach((action, actionIndex) => {
+          const actionId = action._id || action.id || `${cropId}-${action.date}-${actionIndex}`;
+          
+          allActions.push({
+            ...action,
+            id: actionId,
+            _id: action._id || actionId,
+            cropId: cropId,
+            cropName: cropName,
             location: location,
-            status: crop.status,
-            humidity: crop.humidity,
-            bioFertilizer: crop.bioFertilizer,
-            observations: crop.observations,
-            recommendations: crop.recommendations,
-            isLegacy: crop.isLegacy || false,
-            isWebProject: true,
-            isWebAction: true,
-            isLocal: isLocal
-          }
+            _source: isLocal ? 'local' : 'web',
+            synced: crop.synced !== false && action.synced !== false,
+            isLocal: isLocal,
+            cropData: {
+              crop: cropName,
+              location: location,
+              status: crop.status,
+              humidity: crop.humidity,
+              bioFertilizer: crop.bioFertilizer,
+              observations: crop.observations,
+              recommendations: crop.recommendations,
+              isLocal: isLocal
+            }
+          });
         });
-      });
-    } else {
-      console.log('⚠️ Cultivo sin historial:', cropId, cropName);
-    }
-  });
-  
-  return allActions;
-};
+      } else {
+        console.log('⚠️ Cultivo sin historial:', cropId, cropName);
+      }
+    });
+    
+    return allActions;
+  };
 
-  // 🗑️ FUNCIÓN PARA ELIMINAR ACCIÓN
   const handleDeleteAction = async (action) => {
-    // Verificar si es una acción de la web - no se pueden eliminar
-    if (action.isWebAction || action.isLegacy || action.isWebProject) {
-      Alert.alert(
-        '⚠️ Acción no eliminable',
-        'Las acciones de la web no se pueden eliminar desde la app móvil.'
-      );
-      return;
-    }
+    console.log('🗑️ Intentando eliminar acción:', {
+      actionId: action._id,
+      cropId: action.cropId,
+      type: action.type,
+      isLocal: action.isLocal,
+      _source: action._source
+    });
 
-    // Verificar si es una acción local no sincronizada
     if (action._source === 'local' || action.isLocal) {
       Alert.alert(
         '🗑️ Eliminar acción local',
-        '¿Estás seguro de que quieres eliminar esta acción local?',
+        `¿Estás seguro de que quieres eliminar esta acción local?\n\n${getActionDescription(action)}`,
         [
           { text: 'Cancelar', style: 'cancel' },
           { 
@@ -171,7 +210,6 @@ export default function History() {
       return;
     }
 
-    // Para acciones sincronizadas (en la nube)
     Alert.alert(
       '🗑️ Eliminar Acción',
       `¿Estás seguro de que quieres eliminar esta acción?\n\n${getActionDescription(action)}`,
@@ -186,7 +224,6 @@ export default function History() {
     );
   };
 
-  // 🗑️ ELIMINAR ACCIÓN DE LA NUBE
   const deleteCloudAction = async (action) => {
     if (!action.cropId || !action._id) {
       console.log('❌ Faltan IDs para eliminar:', { 
@@ -202,59 +239,122 @@ export default function History() {
     try {
       const url = `${API_BASE_URL}/farmer/crops/${action.cropId}/history/${action._id}`;
       console.log('🔍 URL de eliminación:', url);
+      console.log('🔐 Authorization:', user.id);
       
       const response = await fetch(url, {
         method: 'DELETE',
         headers: {
-          'Authorization': user.id,
+          'Authorization': user.id.toString(),
           'Content-Type': 'application/json'
         }
       });
+
+      console.log('📡 Response status:', response.status);
 
       if (response.ok) {
         const result = await response.json();
         console.log('✅ Eliminación exitosa:', result);
         
-        // Actualizar estado local inmediatamente
+        await refreshCache();
+        
         setActions(prevActions => 
           prevActions.filter(a => a._id !== action._id)
         );
         
-        Alert.alert('✅ Éxito', 'Acción eliminada correctamente');
+        Alert.alert('✅ Éxito', 'Acción eliminada correctamente del servidor');
       } else {
         const errorText = await response.text();
         console.log('❌ Error del servidor:', response.status, errorText);
-        throw new Error(`Error ${response.status}: ${errorText}`);
+        
+        if (response.status === 404) {
+          Alert.alert(
+            '⚠️ Acción no encontrada',
+            'La acción ya fue eliminada o no existe en el servidor.',
+            [
+              { text: 'OK', style: 'default' },
+              { 
+                text: 'Eliminar Localmente', 
+                onPress: () => removeActionLocally(action)
+              }
+            ]
+          );
+        } else {
+          throw new Error(`Error ${response.status}: ${errorText}`);
+        }
       }
     } catch (error) {
       console.error('❌ Error eliminando acción:', error);
-      Alert.alert('❌ Error', `No se pudo eliminar la acción: ${error.message}`);
+      Alert.alert(
+        '❌ Error', 
+        `No se pudo eliminar la acción del servidor: ${error.message}`,
+        [
+          { text: 'OK', style: 'cancel' },
+          { 
+            text: 'Eliminar Localmente', 
+            onPress: () => removeActionLocally(action)
+          }
+        ]
+      );
     } finally {
       setDeletingActionId(null);
     }
   };
 
-  // 🗑️ ELIMINAR ACCIÓN LOCAL
   const deleteLocalAction = async (action) => {
+    setDeletingActionId(action._id);
+
     try {
       console.log('🗑️ Eliminando acción local...');
       
-      const success = await deleteLocalCrop(action.cropId);
+      const localCrops = await getLocalCrops();
+      console.log('📁 Cultivos locales encontrados:', localCrops.length);
       
-      if (success) {
-        // Recargar acciones
-        await loadActions();
-        Alert.alert('✅ Éxito', 'Acción local eliminada correctamente');
-      } else {
-        Alert.alert('Error', 'No se pudo eliminar la acción local');
+      const cropIndex = localCrops.findIndex(crop => 
+        crop.id === action.cropId || crop._id === action.cropId
+      );
+      
+      if (cropIndex === -1) {
+        throw new Error('Cultivo local no encontrado');
       }
+      
+      const updatedCrop = {
+        ...localCrops[cropIndex],
+        history: localCrops[cropIndex].history.filter(act => 
+          act._id !== action._id && act.id !== action._id
+        )
+      };
+      
+      const updatedCrops = [...localCrops];
+      updatedCrops[cropIndex] = updatedCrop;
+      
+      await AsyncStorage.setItem('localCrops', JSON.stringify(updatedCrops));
+      console.log('✅ Acción local eliminada correctamente');
+      
+      await refreshCache();
+      
+      setActions(prevActions => 
+        prevActions.filter(a => a._id !== action._id)
+      );
+      
+      await checkPendingActions();
+      
+      Alert.alert('✅ Éxito', 'Acción local eliminada correctamente');
+      
     } catch (error) {
       console.error('❌ Error eliminando acción local:', error);
       Alert.alert('❌ Error', 'No se pudo eliminar la acción local');
+    } finally {
+      setDeletingActionId(null);
     }
   };
 
-  // 🔄 FUNCIÓN AUXILIAR: Cargar cultivos manualmente (fallback)
+  const removeActionLocally = (action) => {
+    setActions(prevActions => 
+      prevActions.filter(a => a._id !== action._id)
+    );
+    Alert.alert('✅ Éxito', 'Acción removida localmente');
+  };
+
   const loadCropsManually = async () => {
     try {
       const localCropsString = await AsyncStorage.getItem('localCrops') || '[]';
@@ -283,17 +383,25 @@ export default function History() {
     }
   };
 
-  // 🔄 FUNCIÓN DE SINCRONIZACIÓN MANUAL CON WEB
   const handleManualSync = async () => {
     if (!isConnected) {
       Alert.alert('Sin Conexión', 'No hay conexión a internet para sincronizar');
       return;
     }
 
+    if (!user?.id) {
+      Alert.alert('Error', 'Usuario no identificado');
+      return;
+    }
+
     setLoading(true);
     try {
       console.log('🔄 Iniciando sincronización manual...');
+      console.log('📱 Usuario:', user.id);
+      console.log('🔗 API Base URL:', API_BASE_URL);
+      
       const result = await syncPendingData();
+      console.log('📊 Resultado de sincronización:', result);
       
       if (result.success) {
         Alert.alert('✅ Éxito', 
@@ -301,14 +409,29 @@ export default function History() {
             ? `Se sincronizaron ${result.synced} acción(es) correctamente`
             : 'No había acciones pendientes por sincronizar'
         );
-        // Recargar datos
-        await loadActions();
+        
+        await refreshCache();
+        await loadActions(true);
+        await checkPendingActions();
       } else {
-        Alert.alert('❌ Error', 'No se pudieron sincronizar los datos pendientes');
+        console.log('❌ Sincronización falló. Detalles:', result);
+        
+        let errorMessage = 'No se pudieron sincronizar los datos pendientes';
+        if (result.message) {
+          errorMessage = result.message;
+        }
+        if (result.errorDetails && result.errorDetails.length > 0) {
+          errorMessage += `\n\nErrores:\n${result.errorDetails.slice(0, 3).join('\n')}`;
+          if (result.errorDetails.length > 3) {
+            errorMessage += `\n... y ${result.errorDetails.length - 3} más`;
+          }
+        }
+        
+        Alert.alert('❌ Error', errorMessage);
       }
     } catch (error) {
       console.error('❌ Error en sincronización manual:', error);
-      Alert.alert('❌ Error', 'No se pudo completar la sincronización');
+      Alert.alert('❌ Error', `No se pudo completar la sincronización: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -341,10 +464,9 @@ export default function History() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadActions();
+    await loadActions(true);
   };
 
-  // 🔄 FUNCIÓN MEJORADA: Obtener ícono con indicador de origen
   const getActionIcon = (action) => {
     const baseIcon = (() => {
       switch (action.type) {
@@ -357,28 +479,19 @@ export default function History() {
       }
     })();
     
-    // 🔥 NUEVO: Identificar proyectos web
-    if (action.isWebProject) {
-      return `${baseIcon} 🌐`;
-    } else if (action.isWebAction) {
-      return `${baseIcon} 🔗`;
-    } else if (action._source === 'local' || action.isLocal) {
+    if (action._source === 'local' || action.isLocal) {
       return `${baseIcon} 💾`;
     }
     
-    return baseIcon;
+    return `${baseIcon} 🌐`;
   };
 
   const getStatusColor = (action) => {
-    if (action.isWebProject) return '#2196f3';
-    if (action.isWebAction) return '#2196f3';
     if (action._source === 'local' || action.isLocal) return '#ff9800';
     return action.synced ? '#4caf50' : '#ff9800';
   };
 
   const getStatusText = (action) => {
-    if (action.isWebProject) return 'Proyecto Web';
-    if (action.isWebAction) return 'Desde la Web';
     if (action._source === 'local' || action.isLocal) return 'Pendiente de sincronizar';
     return action.synced ? 'Sincronizado' : 'Pendiente';
   };
@@ -396,7 +509,6 @@ export default function History() {
     }
   };
 
-  // 🔄 FUNCIÓN MEJORADA: Obtener descripción de acción
   const getActionDescription = (action) => {
     if (action.action) {
       return action.action;
@@ -419,11 +531,7 @@ export default function History() {
       }
     })();
     
-    if (action.isWebProject) {
-      return `${baseDescription} (Proyecto Web)`;
-    } else if (action.isWebAction) {
-      return `${baseDescription} (Web)`;
-    } else if (action._source === 'local' || action.isLocal) {
+    if (action._source === 'local' || action.isLocal) {
       return `${baseDescription} (Local)`;
     }
     
@@ -433,30 +541,77 @@ export default function History() {
   return (
     <ScrollView 
       style={styles.container}
+      contentContainerStyle={styles.contentContainer}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      <Text style={styles.title}>📊 Historial de Acciones</Text>
+      {/* 🔹 Header - Mismo estilo que Home Farmer */}
+      <View style={styles.header}>
+        <Text style={styles.title}>📊 Historial de Acciones</Text>
+        <Text style={styles.subtitle}>
+          Revisa todas tus actividades agrícolas registradas
+        </Text>
+      </View>
 
-      {/* Información de sincronización */}
-      <View style={styles.syncSection}>
+      {/* 🔹 Información de conexión - Mismo estilo que Home Farmer */}
+      <View style={styles.connectionInfo}>
         <View style={styles.connectionStatus}>
           <View style={[styles.statusDot, isConnected ? styles.statusOnline : styles.statusOffline]} />
           <Text style={styles.statusText}>
             {isConnected ? 'Conectado' : 'Sin conexión'}
           </Text>
         </View>
-
-        {pendingSyncCount > 0 && (
-          <TouchableOpacity style={styles.syncButton} onPress={handleManualSync}>
-            <Text style={styles.syncButtonText}>
-              🔄 Sincronizar {pendingSyncCount} pendiente(s)
-            </Text>
-          </TouchableOpacity>
+        
+        {actualPendingSyncCount > 0 && (
+          <Text style={styles.unsyncedText}>
+            📱 {actualPendingSyncCount} pendientes
+          </Text>
         )}
       </View>
 
-      {/* Filtros */}
+      {/* 🔹 Tarjeta de estadísticas - Mismo estilo que Home Farmer */}
+      <View style={styles.mainCard}>
+        <View style={styles.cardHeader}>
+          <View style={styles.cardTitleContainer}>
+            <Text style={styles.cardIcon}>📈</Text>
+            <View style={styles.cardTitleText}>
+              <Text style={styles.cardName}>Estadísticas del Historial</Text>
+              <Text style={styles.cardSubtitle}>
+                Resumen de todas tus actividades
+              </Text>
+            </View>
+          </View>
+          
+          <View style={[styles.statusBadge, { backgroundColor: isConnected ? '#4caf50' : '#ff9800' }]}>
+            <Text style={styles.statusText}>
+              {isConnected ? '✅ En línea' : '⚠️ Offline'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.cardDetails}>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Total de acciones:</Text>
+            <Text style={styles.detailValue}>{actions.length}</Text>
+          </View>
+
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Acciones filtradas:</Text>
+            <Text style={styles.detailValue}>{filteredActions.length}</Text>
+          </View>
+
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Por sincronizar:</Text>
+            <Text style={[styles.detailValue, { color: actualPendingSyncCount > 0 ? '#ff9800' : '#4caf50' }]}>
+              {actualPendingSyncCount}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* 🔹 Sección de búsqueda y filtros */}
       <View style={styles.filterSection}>
+        <Text style={styles.sectionTitle}>🔍 Buscar y Filtrar</Text>
+        
         <TextInput
           style={styles.searchInput}
           placeholder="Buscar en cultivos, acciones, ubicaciones..."
@@ -483,19 +638,31 @@ export default function History() {
           ))}
         </ScrollView>
 
-        <View style={styles.statsContainer}>
-          <Text style={styles.statsText}>
-            📊 Mostrando {filteredActions.length} de {actions.length} acciones
-          </Text>
-          <Text style={styles.statsSubtext}>
-            {actions.filter(a => a.isWebProject || a.isWebAction).length} desde la web • 
-            {actions.filter(a => a._source === 'local' || a.isLocal).length} locales
-          </Text>
-        </View>
+        {/* 🔹 Botón de sincronización */}
+        {isConnected && actualPendingSyncCount > 0 && (
+          <TouchableOpacity 
+            style={styles.syncButton}
+            onPress={handleManualSync}
+            disabled={loading}
+          >
+            <Text style={styles.syncButtonText}>
+              {loading ? '🔄 Sincronizando...' : `🔄 Sincronizar ${actualPendingSyncCount} pendiente(s)`}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* 🔹 Indicador cuando no hay pendientes */}
+        {isConnected && actualPendingSyncCount === 0 && (
+          <View style={styles.noPendingCard}>
+            <Text style={styles.noPendingText}>✅ Todo sincronizado</Text>
+          </View>
+        )}
       </View>
 
-      {/* Lista de acciones */}
-      <View style={styles.actionsList}>
+      {/* 🔹 Lista de acciones - Mismo estilo de tarjetas */}
+      <View style={styles.actionsSection}>
+        <Text style={styles.sectionTitle}>📋 Lista de Acciones</Text>
+        
         {filteredActions.length > 0 ? (
           filteredActions.map((action, index) => {
             const uniqueKey = generateUniqueKey(action, index);
@@ -503,35 +670,31 @@ export default function History() {
             
             return (
               <View key={uniqueKey} style={styles.actionCard}>
-                <View style={styles.actionHeader}>
-                  <View style={styles.actionTitleContainer}>
-                    <Text style={styles.actionIcon}>{getActionIcon(action)}</Text>
-                    <View style={styles.actionTitleText}>
-                      <Text style={styles.actionType}>
+                <View style={styles.cardHeader}>
+                  <View style={styles.cardTitleContainer}>
+                    <Text style={styles.cardIcon}>{getActionIcon(action)}</Text>
+                    <View style={styles.cardTitleText}>
+                      <Text style={styles.cardName}>
                         {action.type === 'sowing' ? 'Siembra' :
                          action.type === 'watering' ? 'Riego' :
                          action.type === 'fertilization' ? 'Fertilización' :
                          action.type === 'harvest' ? 'Cosecha' :
                          action.type === 'pruning' ? 'Poda' : 'Otra'}
                       </Text>
-                      <Text style={styles.actionDescription}>
+                      <Text style={styles.cardSubtitle}>
                         {getActionDescription(action)}
-                      </Text>
-                      <Text style={styles.actionDate}>
-                        {formatDate(action.date || action.createdAt)}
                       </Text>
                     </View>
                   </View>
                   
                   <View style={styles.headerRight}>
-                    <View style={[styles.syncBadge, { backgroundColor: getStatusColor(action) }]}>
-                      <Text style={styles.syncText}>
+                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(action) }]}>
+                      <Text style={styles.statusText}>
                         {getStatusText(action)}
                       </Text>
                     </View>
                     
-                    {/* 🗑️ BOTÓN DE ELIMINAR - Solo para acciones de la app */}
-                    {!action.isWebAction && !action.isLegacy && !action.isWebProject && (
+                    {isConnected && (
                       <TouchableOpacity
                         style={[styles.deleteButton, isDeleting && styles.deleteButtonDisabled]}
                         onPress={() => handleDeleteAction(action)}
@@ -545,8 +708,7 @@ export default function History() {
                   </View>
                 </View>
 
-                <View style={styles.actionDetails}>
-                  {/* Información del cultivo */}
+                <View style={styles.cardDetails}>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Cultivo:</Text>
                     <Text style={styles.detailValue}>{action.cropName}</Text>
@@ -555,6 +717,11 @@ export default function History() {
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Ubicación:</Text>
                     <Text style={styles.detailValue}>{action.location}</Text>
+                  </View>
+
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Fecha:</Text>
+                    <Text style={styles.detailValue}>{formatDate(action.date || action.createdAt)}</Text>
                   </View>
 
                   {action.seed && (
@@ -601,6 +768,9 @@ export default function History() {
           </View>
         )}
       </View>
+
+      {/* 🔹 Espacio al final para mejor scroll */}
+      <View style={styles.bottomSpacing} />
     </ScrollView>
   );
 }
@@ -609,59 +779,148 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  contentContainer: {
     padding: 16,
+    paddingBottom: 60,
+  },
+  // 🔹 HEADER - Mismo estilo que Home Farmer
+  header: {
+    backgroundColor: '#2e7d32',
+    padding: 20,
+    borderRadius: 12,
+    marginBottom: 16,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
+    color: 'white',
     textAlign: 'center',
-    marginBottom: 16,
-    color: '#2e7d32',
+    marginBottom: 4,
   },
-  syncSection: {
+  subtitle: {
+    fontSize: 14,
+    color: 'white',
+    textAlign: 'center',
+    opacity: 0.9,
+  },
+  // 🔹 INFORMACIÓN DE CONEXIÓN - Mismo estilo que Home Farmer
+  connectionInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
     backgroundColor: 'white',
     padding: 12,
-    borderRadius: 12,
+    borderRadius: 8,
+    marginBottom: 16,
   },
   connectionStatus: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     marginRight: 8,
   },
   statusOnline: {
     backgroundColor: '#4caf50',
   },
   statusOffline: {
-    backgroundColor: '#ff9800',
+    backgroundColor: '#f44336',
   },
   statusText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  unsyncedText: {
+    fontSize: 12,
+    color: '#ff9800',
+    fontWeight: '500',
+  },
+  // 🔹 TARJETAS PRINCIPALES - Mismo estilo que Home Farmer
+  mainCard: {
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  cardTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    flex: 1,
+    marginRight: 8,
+  },
+  cardIcon: {
+    fontSize: 24,
+    marginRight: 12,
+    marginTop: 2,
+  },
+  cardTitleText: {
+    flex: 1,
+  },
+  cardName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 2,
+  },
+  cardSubtitle: {
+    fontSize: 14,
+    color: '#666',
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  cardDetails: {
+    marginBottom: 16,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  detailLabel: {
     fontSize: 14,
     color: '#666',
     fontWeight: '500',
   },
-  syncButton: {
-    backgroundColor: '#2196f3',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+  detailValue: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
   },
-  syncButtonText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
+  // 🔹 SECCIONES
   filterSection: {
-    marginBottom: 20,
+    marginBottom: 16,
   },
+  actionsSection: {
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+  },
+  // 🔹 BÚSQUEDA Y FILTROS
   searchInput: {
     backgroundColor: 'white',
     padding: 12,
@@ -695,23 +954,32 @@ const styles = StyleSheet.create({
   filterTextActive: {
     color: 'white',
   },
-  statsContainer: {
+  // 🔹 BOTONES DE ACCIÓN
+  syncButton: {
+    backgroundColor: '#2196f3',
+    padding: 16,
+    borderRadius: 8,
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
-  statsText: {
-    fontSize: 12,
-    color: '#666',
-    fontStyle: 'italic',
+  syncButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
-  statsSubtext: {
-    fontSize: 11,
-    color: '#999',
-    fontStyle: 'italic',
+  noPendingCard: {
+    backgroundColor: '#4caf50',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 12,
   },
-  actionsList: {
-    marginBottom: 20,
+  noPendingText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
+  // 🔹 TARJETAS DE ACCIONES
   actionCard: {
     backgroundColor: 'white',
     padding: 16,
@@ -723,55 +991,10 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  actionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  actionTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    flex: 1,
-  },
   headerRight: {
-    alignItems: 'flex-end',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
-  },
-  actionIcon: {
-    fontSize: 24,
-    marginRight: 12,
-    marginTop: 2,
-  },
-  actionTitleText: {
-    flex: 1,
-  },
-  actionType: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  actionDescription: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 2,
-    fontStyle: 'italic',
-  },
-  actionDate: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 4,
-  },
-  syncBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
-  },
-  syncText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: 'bold',
   },
   deleteButton: {
     paddingHorizontal: 10,
@@ -787,26 +1010,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
   },
-  actionDetails: {
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    paddingTop: 12,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    marginBottom: 6,
-  },
-  detailLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    width: 120,
-  },
-  detailValue: {
-    fontSize: 14,
-    color: '#666',
-    flex: 1,
-  },
+  // 🔹 ESTADO VACÍO
   emptyState: {
     alignItems: 'center',
     paddingVertical: 60,
@@ -837,5 +1041,9 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  // 🔹 ESPACIO AL FINAL
+  bottomSpacing: {
+    height: 40,
   },
 });

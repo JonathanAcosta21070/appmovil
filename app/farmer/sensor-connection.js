@@ -1,4 +1,4 @@
-// app/farmer/sensor-connection.js - VERSIÓN CON ESTADO PERSISTENTE
+// app/farmer/sensor-connection.js - VERSIÓN CON MÁS ESPACIO AL FINAL
 import React from "react";
 import { 
   View, 
@@ -6,8 +6,8 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  RefreshControl,
 } from "react-native";
-import { router } from "expo-router";
 import { useBle } from '../../contexts/BleContext';
 
 export default function SensorConnectionScreen() {
@@ -36,381 +36,398 @@ export default function SensorConnectionScreen() {
 
   const humidityStatus = getHumidityStatus(humidity);
 
+  const formatTime = (date) => {
+    if (!date) return '--:--:--';
+    return date.toLocaleTimeString('es-MX');
+  };
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      {/* Header Mejorado */}
+    <ScrollView 
+      style={styles.container}
+      contentContainerStyle={styles.contentContainer}
+      refreshControl={
+        <RefreshControl 
+          refreshing={false}
+          onRefresh={scanForDevices}
+        />
+      }
+    >
+      {/* Header con mismo estilo que Crop List */}
       <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <Text style={styles.title}>🌱 Monitoreo de Humedad</Text>
-          <Text style={styles.subtitle}>
-            {isConnected ? "Sensor conectado - Datos en tiempo real" : "Conecta tu sensor ESP32 para monitorear la humedad"}
-          </Text>
-        </View>
-        <View style={styles.headerWave} />
+        <Text style={styles.title}>📡 Conexión de Sensores</Text>
+        <Text style={styles.subtitle}>Monitorea la humedad del suelo en tiempo real</Text>
       </View>
 
-      {/* Tarjeta de Estado de Conexión Mejorada */}
-      <View style={styles.connectionCard}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.connectionTitle}>📡 Estado de Conexión</Text>
-          <View style={[styles.connectionBadge, 
-            isConnected ? styles.connectedBadge : 
-            isScanning ? styles.scanningBadge : styles.disconnectedBadge
-          ]}>
-            <Text style={styles.badgeText}>
-              {isConnected ? 'Conectado' : isScanning ? 'Escaneando' : 'Desconectado'}
-            </Text>
-          </View>
+      {/* Información de conexión */}
+      <View style={styles.connectionInfo}>
+        <View style={styles.connectionStatus}>
+          <View style={[styles.statusDot, isConnected ? styles.statusOnline : styles.statusOffline]} />
+          <Text style={styles.statusText}>
+            {isConnected ? 'Conectado' : isScanning ? 'Escaneando...' : 'Desconectado'}
+          </Text>
         </View>
         
-        <View style={styles.statusContainer}>
-          <View style={styles.statusRow}>
-            <View style={[styles.statusIndicator, { 
-              backgroundColor: isConnected ? '#4caf50' : isScanning ? '#ff9800' : '#f44336' 
-            }]} />
-            <Text style={styles.statusText}>
-              {isConnected ? `✅ ${status}` : isScanning ? `🔍 ${status}` : `🔌 ${status}`}
-            </Text>
-          </View>
-
-          {deviceName && isConnected && (
-            <View style={styles.deviceInfo}>
-              <Text style={styles.deviceLabel}>Dispositivo conectado:</Text>
-              <Text style={styles.deviceName}>📱 {deviceName}</Text>
-            </View>
-          )}
-
-          {connectionError ? (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorIcon}>⚠️</Text>
-              <Text style={styles.errorText}>{connectionError}</Text>
-            </View>
-          ) : null}
-        </View>
-
-        {/* Botones de Control Mejorados */}
-        <View style={styles.buttonContainer}>
-          {isConnected ? (
-            <TouchableOpacity 
-              style={[styles.button, styles.disconnectButton]}
-              onPress={disconnectDevice}
-            >
-              <View style={styles.buttonContent}>
-                <Text style={styles.buttonIcon}>🔴</Text>
-                <Text style={styles.buttonText}>Desconectar Sensor</Text>
-              </View>
-            </TouchableOpacity>
-          ) : isScanning ? (
-            <View style={styles.scanButtonsContainer}>
-              <TouchableOpacity 
-                style={[styles.button, styles.stopButton]}
-                onPress={stopScan}
-              >
-                <View style={styles.buttonContent}>
-                  <Text style={styles.buttonIcon}>⏹️</Text>
-                  <Text style={styles.buttonText}>Detener Escaneo</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity 
-              style={[styles.button, styles.connectButton]}
-              onPress={scanForDevices}
-            >
-              <View style={styles.buttonContent}>
-                <Text style={styles.buttonIcon}>🔍</Text>
-                <Text style={styles.buttonText}>Buscar Sensores</Text>
-              </View>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Lista de Dispositivos Encontrados */}
-        {devicesList.length > 0 && !isConnected && (
-          <View style={styles.devicesListContainer}>
-            <Text style={styles.devicesListTitle}>📋 Sensores Disponibles:</Text>
-            {devicesList.map((device) => (
-              <TouchableOpacity
-                key={device.id}
-                style={styles.deviceItem}
-                onPress={() => connectToDevice(device.device)}
-              >
-                <View style={styles.deviceItemContent}>
-                  <Text style={styles.deviceItemIcon}>📱</Text>
-                  <View style={styles.deviceItemInfo}>
-                    <Text style={styles.deviceItemName}>{device.name}</Text>
-                    <Text style={styles.deviceItemId}>{device.id}</Text>
-                  </View>
-                  <Text style={styles.deviceItemConnect}>Conectar →</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
+        {lastUpdate && isConnected && (
+          <Text style={styles.lastUpdateText}>
+            🕒 {formatTime(lastUpdate)}
+          </Text>
         )}
       </View>
 
-      {/* Tarjeta de Humedad del Suelo Mejorada */}
-      <View style={styles.dataCard}>
+      {/* Tarjeta principal de estado */}
+      <View style={styles.mainCard}>
         <View style={styles.cardHeader}>
-          <Text style={styles.dataTitle}>💧 Humedad del Suelo</Text>
-          <View style={[styles.humidityBadge, { backgroundColor: humidityStatus.color }]}>
-            <Text style={styles.badgeText}>{humidityStatus.level}</Text>
+          <View style={styles.cardTitleContainer}>
+            <Text style={styles.cardIcon}>🌡️</Text>
+            <View style={styles.cardTitleText}>
+              <Text style={styles.cardName}>Sensor de Humedad</Text>
+              <Text style={styles.cardSubtitle}>
+                {isConnected ? (deviceName || 'Dispositivo ESP32') : 'Desconectado'}
+              </Text>
+            </View>
           </View>
-        </View>
-        
-        <View style={styles.humidityMainContainer}>
-          <View style={styles.humidityValueContainer}>
-            <Text style={[styles.humidityValue, { color: humidityStatus.color }]}>
-              {humidity !== null ? `${humidity}%` : '--%'}
-            </Text>
-            <Text style={[styles.humidityStatus, { color: humidityStatus.color }]}>
+          
+          <View style={[styles.statusBadge, { backgroundColor: humidityStatus.color }]}>
+            <Text style={styles.statusText}>
               {humidityStatus.icon} {humidityStatus.level}
             </Text>
           </View>
-          
-          {isConnected && (
-            <View style={styles.adviceContainer}>
-              <Text style={styles.adviceIcon}>💡</Text>
-              <Text style={styles.adviceText}>{humidityStatus.advice}</Text>
-            </View>
-          )}
-          
-          {/* Barra de humedad visual mejorada */}
-          <View style={styles.humidityBarContainer}>
-            <View style={styles.humidityBar}>
-              <View 
-                style={[
-                  styles.humidityFill,
-                  { 
-                    width: `${humidity !== null ? Math.min(humidity, 100) : 0}%`,
-                    backgroundColor: humidityStatus.color
-                  }
-                ]} 
-              />
-            </View>
-            <Text style={styles.humidityPercentage}>
-              {humidity !== null ? `${humidity}%` : '0%'}
+        </View>
+
+        <View style={styles.cardDetails}>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Estado:</Text>
+            <Text style={styles.detailValue}>
+              {isConnected ? '✅ Conectado' : isScanning ? '🔍 Escaneando' : '🔌 Desconectado'}
             </Text>
           </View>
-          
-          {/* Indicadores de niveles mejorados */}
-          <View style={styles.levelIndicators}>
-            <View style={styles.levelItem}>
-              <View style={[styles.levelDot, { backgroundColor: '#f44336' }]} />
-              <Text style={[styles.levelText, humidity !== null && humidity < 30 && styles.levelActive]}>
-                Seco
-              </Text>
-            </View>
-            <View style={styles.levelItem}>
-              <View style={[styles.levelDot, { backgroundColor: '#4caf50' }]} />
-              <Text style={[styles.levelText, humidity !== null && humidity >= 30 && humidity < 60 && styles.levelActive]}>
-                Óptimo
-              </Text>
-            </View>
-            <View style={styles.levelItem}>
-              <View style={[styles.levelDot, { backgroundColor: '#2196f3' }]} />
-              <Text style={[styles.levelText, humidity !== null && humidity >= 60 && styles.levelActive]}>
-                Húmedo
-              </Text>
-            </View>
+
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Humedad actual:</Text>
+            <Text style={[styles.detailValue, { color: humidityStatus.color }]}>
+              {humidity !== null ? `${humidity}%` : '--%'}
+            </Text>
+          </View>
+
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Recomendación:</Text>
+            <Text style={styles.detailValue}>{humidityStatus.advice}</Text>
           </View>
         </View>
 
-        {lastUpdate && isConnected && (
-          <View style={styles.updateContainer}>
-            <Text style={styles.updateIcon}>🕒</Text>
-            <Text style={styles.lastUpdate}>
-              Actualizado: {lastUpdate.toLocaleTimeString('es-MX')}
-            </Text>
+        {/* Barra de humedad visual */}
+        <View style={styles.humidityBarContainer}>
+          <View style={styles.humidityBar}>
+            <View 
+              style={[
+                styles.humidityFill,
+                { 
+                  width: `${humidity !== null ? Math.min(humidity, 100) : 0}%`,
+                  backgroundColor: humidityStatus.color
+                }
+              ]} 
+            />
           </View>
-        )}
-        
-        {isConnected && humidity === null && (
-          <View style={styles.waitingContainer}>
-            <Text style={styles.waitingIcon}>⏳</Text>
-            <Text style={styles.waitingText}>Esperando datos del sensor...</Text>
+          <View style={styles.humidityLabels}>
+            <Text style={styles.humidityLabel}>0%</Text>
+            <Text style={styles.humidityLabel}>50%</Text>
+            <Text style={styles.humidityLabel}>100%</Text>
           </View>
-        )}
+        </View>
 
-        {!isConnected && (
-          <View style={styles.notConnectedContainer}>
-            <Text style={styles.notConnectedIcon}>🔌</Text>
-            <Text style={styles.notConnectedText}>
-              Conecta un sensor para ver los datos de humedad
-            </Text>
+        {/* Botones de control */}
+        <View style={styles.controlsContainer}>
+          {isConnected ? (
+            <TouchableOpacity 
+              style={[styles.controlButton, styles.disconnectButton]}
+              onPress={disconnectDevice}
+            >
+              <Text style={styles.controlButtonText}>🔴 Desconectar</Text>
+            </TouchableOpacity>
+          ) : isScanning ? (
+            <TouchableOpacity 
+              style={[styles.controlButton, styles.stopButton]}
+              onPress={stopScan}
+            >
+              <Text style={styles.controlButtonText}>⏹️ Detener Escaneo</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity 
+              style={[styles.controlButton, styles.connectButton]}
+              onPress={scanForDevices}
+            >
+              <Text style={styles.controlButtonText}>🔍 Buscar Sensores</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {connectionError && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorIcon}>⚠️</Text>
+            <Text style={styles.errorText}>{connectionError}</Text>
           </View>
         )}
       </View>
+
+      {/* Lista de dispositivos disponibles */}
+      {devicesList.length > 0 && !isConnected && (
+        <View style={styles.devicesSection}>
+          <Text style={styles.sectionTitle}>📋 Sensores Disponibles</Text>
+          {devicesList.map((device) => (
+            <View key={device.id} style={styles.deviceCardContainer}>
+              <TouchableOpacity
+                style={styles.deviceCard}
+                onPress={() => connectToDevice(device.device)}
+              >
+                <View style={styles.deviceHeader}>
+                  <View style={styles.deviceTitleContainer}>
+                    <Text style={styles.deviceIcon}>📱</Text>
+                    <View style={styles.deviceTitleText}>
+                      <Text style={styles.deviceName}>{device.name}</Text>
+                      <Text style={styles.deviceId}>ID: {device.id}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.connectText}>Conectar →</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+      )}
 
       {/* Información de ayuda */}
       <View style={styles.helpCard}>
-        <Text style={styles.helpTitle}>📋 Estado Persistente</Text>
+        <Text style={styles.helpTitle}>💡 Cómo usar</Text>
         <View style={styles.helpList}>
           <View style={styles.helpItem}>
-            <Text style={styles.helpIcon}>✅</Text>
-            <Text style={styles.helpText}>La conexión se mantiene al salir de la pantalla</Text>
+            <Text style={styles.helpIcon}>1️⃣</Text>
+            <Text style={styles.helpText}>Presiona "Buscar Sensores" para encontrar dispositivos</Text>
           </View>
           <View style={styles.helpItem}>
-            <Text style={styles.helpIcon}>📱</Text>
-            <Text style={styles.helpText}>Los datos siguen llegando en segundo plano</Text>
+            <Text style={styles.helpIcon}>2️⃣</Text>
+            <Text style={styles.helpText}>Selecciona tu sensor ESP32 de la lista</Text>
           </View>
           <View style={styles.helpItem}>
-            <Text style={styles.helpIcon}>🔄</Text>
-            <Text style={styles.helpText}>Al volver, verás los datos actualizados</Text>
+            <Text style={styles.helpIcon}>3️⃣</Text>
+            <Text style={styles.helpText}>Monitorea la humedad en tiempo real</Text>
           </View>
           <View style={styles.helpItem}>
-            <Text style={styles.helpIcon}>⏹️</Text>
-            <Text style={styles.helpText}>Solo se desconecta cuando tú lo decides</Text>
+            <Text style={styles.helpIcon}>4️⃣</Text>
+            <Text style={styles.helpText}>Usa "Desconectar" cuando termines</Text>
           </View>
         </View>
       </View>
 
-      {/* Botón para volver mejorado - SIN DESCONEXIÓN AUTOMÁTICA */}
-      <TouchableOpacity 
-        style={styles.backButton}
-        onPress={() => router.back()}
-      >
-        <View style={styles.backButtonContent}>
-          <Text style={styles.backButtonIcon}>←</Text>
-          <Text style={styles.backButtonText}>Volver al Panel Principal</Text>
+      {/* Niveles de referencia */}
+      <View style={styles.levelsCard}>
+        <Text style={styles.levelsTitle}>📊 Niveles de Humedad</Text>
+        <View style={styles.levelsList}>
+          <View style={styles.levelItem}>
+            <View style={[styles.levelColor, { backgroundColor: '#f44336' }]} />
+            <Text style={styles.levelText}>Baja (0-30%): Necesita riego urgente</Text>
+          </View>
+          <View style={styles.levelItem}>
+            <View style={[styles.levelColor, { backgroundColor: '#4caf50' }]} />
+            <Text style={styles.levelText}>Óptima (30-60%): Condiciones ideales</Text>
+          </View>
+          <View style={styles.levelItem}>
+            <View style={[styles.levelColor, { backgroundColor: '#2196f3' }]} />
+            <Text style={styles.levelText}>Alta (60-100%): Suelo húmedo</Text>
+          </View>
         </View>
-      </TouchableOpacity>
+      </View>
+
+      {/* Espacio al final para mejor scroll - MÁS ESPACIO como en Home Farmer */}
+      <View style={styles.bottomSpacing} />
     </ScrollView>
   );
 }
 
-// Tus estilos permanecen exactamente iguales...
 const styles = StyleSheet.create({
-  // ... (todos tus estilos existentes se mantienen igual)
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: '#f5f5f5',
   },
   contentContainer: {
-    paddingBottom: 30,
+    padding: 16,
+    paddingBottom: 60, // ✅ Más espacio al fondo como en Home Farmer
   },
   header: {
     backgroundColor: '#2e7d32',
-    paddingBottom: 20,
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
-    overflow: 'hidden',
-  },
-  headerContent: {
     padding: 20,
-    paddingTop: 60,
-    alignItems: 'center',
-  },
-  headerWave: {
-    height: 20,
-    backgroundColor: '#f8fafc',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderRadius: 12,
+    marginBottom: 16,
   },
   title: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: 'bold',
     color: 'white',
-    marginBottom: 8,
     textAlign: 'center',
+    marginBottom: 4,
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 14,
     color: 'white',
     textAlign: 'center',
     opacity: 0.9,
-    lineHeight: 20,
   },
-  connectionCard: {
+  connectionInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     backgroundColor: 'white',
-    margin: 20,
-    marginTop: 10,
-    padding: 25,
-    borderRadius: 20,
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  connectionStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  statusOnline: {
+    backgroundColor: '#4caf50',
+  },
+  statusOffline: {
+    backgroundColor: '#f44336',
+  },
+  statusText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  lastUpdateText: {
+    fontSize: 12,
+    color: '#666',
+  },
+  mainCard: {
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
+    shadowRadius: 4,
+    elevation: 3,
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
+    alignItems: 'flex-start',
+    marginBottom: 16,
   },
-  connectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1a237e',
+  cardTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    flex: 1,
+    marginRight: 8,
   },
-  connectionBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
+  cardIcon: {
+    fontSize: 24,
+    marginRight: 12,
+    marginTop: 2,
   },
-  connectedBadge: {
-    backgroundColor: '#e8f5e8',
+  cardTitleText: {
+    flex: 1,
   },
-  scanningBadge: {
-    backgroundColor: '#fff3e0',
-  },
-  disconnectedBadge: {
-    backgroundColor: '#f3f4f6',
-  },
-  badgeText: {
-    fontSize: 12,
+  cardName: {
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
+    marginBottom: 2,
   },
-  statusContainer: {
-    marginBottom: 20,
-  },
-  statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  statusIndicator: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    marginRight: 12,
-  },
-  statusText: {
-    fontSize: 16,
-    color: '#37474f',
-    flex: 1,
-    fontWeight: '500',
-  },
-  deviceInfo: {
-    backgroundColor: '#f3f4f6',
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 15,
-  },
-  deviceLabel: {
+  cardSubtitle: {
     fontSize: 14,
     color: '#666',
-    marginBottom: 4,
   },
-  deviceName: {
-    fontSize: 16,
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  cardDetails: {
+    marginBottom: 16,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  detailLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  detailValue: {
+    fontSize: 14,
+    color: '#333',
     fontWeight: '600',
-    color: '#1f2937',
+  },
+  humidityBarContainer: {
+    marginBottom: 16,
+  },
+  humidityBar: {
+    width: '100%',
+    height: 20,
+    backgroundColor: '#e5e7eb',
+    borderRadius: 10,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  humidityFill: {
+    height: '100%',
+    borderRadius: 10,
+    transition: 'width 0.5s ease-in-out',
+  },
+  humidityLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  humidityLabel: {
+    fontSize: 12,
+    color: '#666',
+  },
+  controlsContainer: {
+    marginBottom: 12,
+  },
+  controlButton: {
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  connectButton: {
+    backgroundColor: '#4caf50',
+  },
+  disconnectButton: {
+    backgroundColor: '#f44336',
+  },
+  stopButton: {
+    backgroundColor: '#ff9800',
+  },
+  controlButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   errorContainer: {
     backgroundColor: '#fef2f2',
-    padding: 15,
-    borderRadius: 12,
+    padding: 12,
+    borderRadius: 8,
     flexDirection: 'row',
     alignItems: 'center',
     borderLeftWidth: 4,
     borderLeftColor: '#dc2626',
   },
   errorIcon: {
-    marginRight: 10,
-    fontSize: 16,
+    marginRight: 8,
   },
   errorText: {
     color: '#dc2626',
@@ -418,317 +435,130 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     flex: 1,
   },
-  buttonContainer: {
-    marginTop: 10,
+  devicesSection: {
+    marginBottom: 16,
   },
-  scanButtonsContainer: {
-    gap: 10,
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
   },
-  button: {
-    padding: 18,
-    borderRadius: 14,
-    alignItems: 'center',
+  deviceCardContainer: {
+    marginBottom: 12,
+  },
+  deviceCard: {
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  connectButton: {
-    backgroundColor: '#2563eb',
-  },
-  disconnectButton: {
-    backgroundColor: '#dc2626',
-  },
-  stopButton: {
-    backgroundColor: '#f59e0b',
-  },
-  buttonContent: {
+  deviceHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonIcon: {
-    fontSize: 20,
-    marginRight: 10,
-  },
-  buttonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  // Lista de dispositivos
-  devicesListContainer: {
-    marginTop: 20,
-    paddingTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-  },
-  devicesListTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#374151',
-    marginBottom: 12,
-  },
-  deviceItem: {
-    backgroundColor: '#f8fafc',
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  deviceItemContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  deviceItemIcon: {
+  deviceTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  deviceIcon: {
     fontSize: 20,
     marginRight: 12,
   },
-  deviceItemInfo: {
+  deviceTitleText: {
     flex: 1,
   },
-  deviceItemName: {
+  deviceName: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
+    fontWeight: 'bold',
+    color: '#333',
     marginBottom: 2,
   },
-  deviceItemId: {
+  deviceId: {
     fontSize: 12,
-    color: '#6b7280',
+    color: '#666',
   },
-  deviceItemConnect: {
+  connectText: {
     fontSize: 14,
-    color: '#2563eb',
+    color: '#2196f3',
     fontWeight: '600',
-  },
-  dataCard: {
-    backgroundColor: 'white',
-    margin: 20,
-    marginTop: 10,
-    padding: 25,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
-  },
-  dataTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1a237e',
-  },
-  humidityBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  humidityMainContainer: {
-    alignItems: 'center',
-  },
-  humidityValueContainer: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  humidityValue: {
-    fontSize: 52,
-    fontWeight: 'bold',
-    marginBottom: 8,
-    textShadowColor: 'rgba(0,0,0,0.1)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  humidityStatus: {
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  adviceContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f9ff',
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 25,
-    width: '100%',
-  },
-  adviceIcon: {
-    fontSize: 20,
-    marginRight: 10,
-  },
-  adviceText: {
-    fontSize: 15,
-    color: '#0369a1',
-    fontWeight: '500',
-    flex: 1,
-    fontStyle: 'italic',
-  },
-  notConnectedContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f3f4f6',
-    padding: 20,
-    borderRadius: 12,
-    marginTop: 10,
-  },
-  notConnectedIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  notConnectedText: {
-    fontSize: 16,
-    color: '#6b7280',
-    fontWeight: '500',
-    textAlign: 'center',
-    flex: 1,
-  },
-  humidityBarContainer: {
-    width: '100%',
-    marginBottom: 20,
-  },
-  humidityBar: {
-    width: '100%',
-    height: 16,
-    backgroundColor: '#e5e7eb',
-    borderRadius: 8,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  humidityFill: {
-    height: '100%',
-    borderRadius: 8,
-    transition: 'width 0.5s ease-in-out',
-  },
-  humidityPercentage: {
-    textAlign: 'center',
-    fontSize: 14,
-    color: '#6b7280',
-    fontWeight: '600',
-  },
-  levelIndicators: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-    marginTop: 10,
-  },
-  levelItem: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  levelDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginBottom: 5,
-  },
-  levelText: {
-    fontSize: 12,
-    color: '#9ca3af',
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  levelActive: {
-    color: '#1f2937',
-    fontWeight: 'bold',
-  },
-  updateContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 15,
-    paddingTop: 15,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-  },
-  updateIcon: {
-    marginRight: 8,
-  },
-  lastUpdate: {
-    fontSize: 12,
-    color: '#6b7280',
-    fontStyle: 'italic',
-  },
-  waitingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 15,
-    padding: 12,
-    backgroundColor: '#fffbeb',
-    borderRadius: 8,
-  },
-  waitingIcon: {
-    marginRight: 8,
-  },
-  waitingText: {
-    fontSize: 14,
-    color: '#d97706',
-    fontWeight: '500',
   },
   helpCard: {
     backgroundColor: 'white',
-    margin: 20,
-    marginTop: 10,
-    padding: 25,
-    borderRadius: 20,
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
+    shadowRadius: 4,
+    elevation: 3,
   },
   helpTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#1a237e',
-    marginBottom: 15,
+    color: '#333',
+    marginBottom: 12,
   },
   helpList: {
     gap: 12,
   },
   helpItem: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
   helpIcon: {
-    fontSize: 16,
     marginRight: 12,
-    width: 24,
+    fontSize: 16,
   },
   helpText: {
     fontSize: 14,
-    color: '#4b5563',
+    color: '#666',
     flex: 1,
+    lineHeight: 20,
   },
-  backButton: {
-    backgroundColor: '#374151',
-    margin: 20,
-    marginTop: 10,
-    padding: 18,
-    borderRadius: 14,
+  levelsCard: {
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  backButtonContent: {
+  levelsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+  },
+  levelsList: {
+    gap: 10,
+  },
+  levelItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
   },
-  backButtonIcon: {
-    fontSize: 20,
-    color: 'white',
-    marginRight: 10,
+  levelColor: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    marginRight: 12,
   },
-  backButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
+  levelText: {
+    fontSize: 14,
+    color: '#666',
+    flex: 1,
+  },
+  bottomSpacing: {
+    height: 40, // ✅ Más espacio para mejor experiencia de scroll
   },
 });

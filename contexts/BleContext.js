@@ -1,4 +1,4 @@
-// contexts/BleContext.js - VERSIÓN MEJORADA
+// contexts/BleContext.js - VERSIÓN MEJORADA CON VALOR 0 POR DEFECTO
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import { BleManager } from 'react-native-ble-plx';
 import { Platform, PermissionsAndroid } from 'react-native';
@@ -18,7 +18,8 @@ export const useBle = () => {
 };
 
 export const BleProvider = ({ children }) => {
-  const [humidity, setHumidity] = useState(null);
+  // ✅ MODIFICADO: Siempre devolver un número, nunca null
+  const [humidity, setHumidity] = useState(0); // Inicializado en 0 en lugar de null
   const [status, setStatus] = useState("Desconectado");
   const [isConnected, setIsConnected] = useState(false);
   const [deviceName, setDeviceName] = useState("");
@@ -262,7 +263,7 @@ export const BleProvider = ({ children }) => {
     }
   };
 
-  // ✅ Procesar datos recibidos (sin cambios)
+  // ✅ Procesar datos recibidos - MODIFICADO PARA SIEMPRE DEVOLVER NÚMERO
   const processReceivedData = (data) => {
     try {
       console.log("📥 Datos recibidos:", data);
@@ -277,7 +278,8 @@ export const BleProvider = ({ children }) => {
         
         if (sensorData.m !== undefined) {
           const moistureValue = sensorData.m;
-          setHumidity(moistureValue);
+          // ✅ MODIFICADO: Siempre establecer un número, nunca null
+          setHumidity(moistureValue || 0);
           setLastUpdate(new Date());
           setStatus(`Conectado - Humedad: ${moistureValue}%`);
           return true;
@@ -286,7 +288,8 @@ export const BleProvider = ({ children }) => {
         const moistureMatch = trimmedData.match(/"m":\s*(\d+)/);
         if (moistureMatch) {
           const moistureValue = parseInt(moistureMatch[1]);
-          setHumidity(moistureValue);
+          // ✅ MODIFICADO: Siempre establecer un número, nunca null
+          setHumidity(moistureValue || 0);
           setLastUpdate(new Date());
           setStatus(`Conectado - Humedad: ${moistureValue}%`);
           return true;
@@ -299,13 +302,14 @@ export const BleProvider = ({ children }) => {
     }
   };
 
-  // ✅ Manejar desconexión
+  // ✅ Manejar desconexión - MODIFICADO PARA RESETEAR A 0
   const handleDisconnection = (message = "Desconectado") => {
     setIsConnected(false);
     setCurrentDevice(null);
     setStatus(message);
     setConnectionError(message);
-    setHumidity(null);
+    // ✅ MODIFICADO: Resetear a 0 en lugar de null
+    setHumidity(0);
     bufferRef.current = "";
   };
 
@@ -345,7 +349,7 @@ export const BleProvider = ({ children }) => {
 
   const value = {
     // Estados
-    humidity,
+    humidity, // ✅ Siempre será un número (0 cuando no hay conexión)
     status,
     isConnected,
     deviceName,
