@@ -1,8 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, RefreshControl } from 'react-native';
+// app/scientist/crop-details.js
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { 
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, 
+  ActivityIndicator, RefreshControl 
+} from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSync } from '../../../contexts/SyncContext';
 import { scientistService } from '../../../services/scientistService';
+
+// Constantes para evitar magic numbers
+const STATUS_COLORS = {
+  activo: '#4caf50',
+  cosechado: '#ff9800',
+  abandonado: '#f44336',
+  inactivo: '#f44336',
+  problema: '#ff5722',
+  pendiente: '#ffc107',
+  default: '#666'
+};
 
 export default function CropDetails() {
   const { id } = useLocalSearchParams();
@@ -11,16 +26,19 @@ export default function CropDetails() {
   const [refreshing, setRefreshing] = useState(false);
   const { user, isConnected, unsyncedCount } = useSync();
 
-  useEffect(() => {
-    if (id && id !== 'undefined') {
-      loadCropDetails();
-    } else {
+  // Memoizar funciones
+  const getStatusColor = useCallback((status) => {
+    return STATUS_COLORS[status?.toLowerCase()] || STATUS_COLORS.default;
+  }, []);
+
+  // Cargar detalles del cultivo
+  const loadCropDetails = useCallback(async () => {
+    if (!id || id === 'undefined') {
       Alert.alert('Error', 'ID del cultivo no válido');
       setIsLoading(false);
+      return;
     }
-  }, [id]);
 
-  const loadCropDetails = async () => {
     try {
       setIsLoading(true);
       const cropData = await scientistService.getCropDetails(user.id, id);
@@ -31,25 +49,29 @@ export default function CropDetails() {
       setIsLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [id, user.id]);
 
-  const onRefresh = () => {
+  useEffect(() => {
+    loadCropDetails();
+  }, [loadCropDetails]);
+
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
     loadCropDetails();
-  };
+  }, [loadCropDetails]);
 
-  const getStatusColor = (status) => {
-    switch (status?.toLowerCase()) {
-      case 'activo': return '#4caf50';
-      case 'cosechado': return '#ff9800';
-      case 'abandonado': return '#f44336';
-      case 'inactivo': return '#f44336';
-      case 'problema': return '#ff5722';
-      case 'pendiente': return '#ffc107';
-      default: return '#666';
-    }
-  };
+  // Memoizar componentes que se renderizan frecuentemente
 
+  const HeaderSection = useMemo(() => (
+    <View style={styles.header}>
+      <Text style={styles.title}>🌱 Detalles del Cultivo</Text>
+      <Text style={styles.subtitle}>
+        Información completa y seguimiento
+      </Text>
+    </View>
+  ), []);
+
+  // Componente de carga
   if (isLoading && !refreshing) {
     return (
       <View style={styles.loadingScreen}>
@@ -79,31 +101,9 @@ export default function CropDetails() {
       }
       showsVerticalScrollIndicator={true}
     >
-      {/* 🔹 Header - Mismo estilo que Farmer Details */}
-      <View style={styles.header}>
-        <Text style={styles.title}>🌱 Detalles del Cultivo</Text>
-        <Text style={styles.subtitle}>
-          Información completa y seguimiento
-        </Text>
-      </View>
+      {HeaderSection}
 
-      {/* 🔹 Información de conexión - Mismo estilo que Farmer Details */}
-      <View style={styles.connectionInfo}>
-        <View style={styles.connectionStatus}>
-          <View style={[styles.statusDot, isConnected ? styles.statusOnline : styles.statusOffline]} />
-          <Text style={styles.statusText}>
-            {isConnected ? 'Conectado' : 'Sin conexión'}
-          </Text>
-        </View>
-        
-        {unsyncedCount > 0 && (
-          <Text style={styles.unsyncedText}>
-            📱 {unsyncedCount} pendientes
-          </Text>
-        )}
-      </View>
-
-      {/* 🔹 Tarjeta principal de información - Mismo estilo que Farmer Details */}
+      {/* Tarjeta principal */}
       <View style={styles.mainCard}>
         <View style={styles.cardHeader}>
           <View style={styles.cardTitleContainer}>
@@ -149,139 +149,155 @@ export default function CropDetails() {
         </View>
       </View>
 
-      {/* 🔹 Información detallada del cultivo */}
-      <View style={styles.detailsSection}>
-        <Text style={styles.sectionTitle}>📋 Información del Cultivo</Text>
-        
-        <View style={styles.detailsGrid}>
-          {crop.seed && (
-            <View style={styles.detailCard}>
-              <Text style={styles.detailCardIcon}>🌱</Text>
-              <View style={styles.detailCardContent}>
-                <Text style={styles.detailCardLabel}>Semilla</Text>
-                <Text style={styles.detailCardValue}>{crop.seed}</Text>
-              </View>
-            </View>
-          )}
+      {/* Información detallada */}
+      <CropDetailsSection crop={crop} getStatusColor={getStatusColor} />
+      
+      {/* Historial */}
+      <HistorySection history={crop.history} />
+      
+      {/* Sincronización */}
+      <SyncSection synced={crop.synced} />
+      
+      {/* Ayuda */}
+      <HelpSection />
 
-          {crop.bioFertilizer && (
-            <View style={styles.detailCard}>
-              <Text style={styles.detailCardIcon}>🧪</Text>
-              <View style={styles.detailCardContent}>
-                <Text style={styles.detailCardLabel}>Biofertilizante</Text>
-                <Text style={styles.detailCardValue}>{crop.bioFertilizer}</Text>
-              </View>
-            </View>
-          )}
-
-          {crop.humidity && (
-            <View style={styles.detailCard}>
-              <Text style={styles.detailCardIcon}>💧</Text>
-              <View style={styles.detailCardContent}>
-                <Text style={styles.detailCardLabel}>Humedad</Text>
-                <Text style={styles.detailCardValue}>{crop.humidity}%</Text>
-              </View>
-            </View>
-          )}
-
-          <View style={styles.detailCard}>
-            <Text style={styles.detailCardIcon}>📊</Text>
-            <View style={styles.detailCardContent}>
-              <Text style={styles.detailCardLabel}>Estado</Text>
-              <View style={styles.statusContainer}>
-                <View style={[styles.statusDotSmall, { backgroundColor: getStatusColor(crop.status) }]} />
-                <Text style={styles.detailCardValue}>{crop.status}</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {crop.observations && (
-          <View style={styles.textCard}>
-            <Text style={styles.textCardTitle}>📝 Observaciones del Agricultor</Text>
-            <Text style={styles.textCardContent}>{crop.observations}</Text>
-          </View>
-        )}
-
-        {crop.recommendations && (
-          <View style={styles.textCard}>
-            <Text style={styles.textCardTitle}>💡 Notas del Agricultor</Text>
-            <Text style={styles.textCardContent}>{crop.recommendations}</Text>
-          </View>
-        )}
-      </View>
-
-      {/* 🔹 Historial de acciones */}
-      {crop.history && crop.history.length > 0 && (
-        <View style={styles.historySection}>
-          <Text style={styles.sectionTitle}>📈 Historial de Acciones</Text>
-          
-          {crop.history.slice(0, 10).map((action, index) => (
-            <View key={action._id || `action-${index}`} style={styles.actionCard}>
-              <View style={styles.actionHeader}>
-                <Text style={styles.actionDate}>
-                  {action.date ? new Date(action.date).toLocaleDateString('es-MX') : 'Fecha no disponible'}
-                </Text>
-                <View style={[styles.actionTypeBadge, { backgroundColor: '#2196f3' }]}>
-                  <Text style={styles.actionTypeText}>ACCIÓN</Text>
-                </View>
-              </View>
-              
-              <Text style={styles.actionText}>{action.action}</Text>
-              
-              {action.observations && (
-                <Text style={styles.actionNotes}>📝 {action.observations}</Text>
-              )}
-              
-              <View style={styles.actionMeta}>
-                {action.seed && <Text style={styles.actionMetaText}>🌱 {action.seed}</Text>}
-                {action.bioFertilizer && <Text style={styles.actionMetaText}>🧪 {action.bioFertilizer}</Text>}
-              </View>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* 🔹 Estado de sincronización */}
-      {crop.synced === false && (
-        <View style={styles.syncSection}>
-          <View style={styles.syncCard}>
-            <Text style={styles.syncIcon}>⚠️</Text>
-            <View style={styles.syncContent}>
-              <Text style={styles.syncTitle}>Pendiente de sincronización</Text>
-              <Text style={styles.syncText}>Este cultivo tiene datos pendientes de sincronizar con el servidor</Text>
-            </View>
-          </View>
-        </View>
-      )}
-
-      {/* 🔹 Información adicional */}
-      <View style={styles.helpSection}>
-        <View style={styles.helpCard}>
-          <Text style={styles.helpTitle}>💡 Información del Cultivo</Text>
-          <View style={styles.helpList}>
-            <View style={styles.helpItem}>
-              <Text style={styles.helpIcon}>•</Text>
-              <Text style={styles.helpText}>El historial muestra las últimas 10 acciones registradas</Text>
-            </View>
-            <View style={styles.helpItem}>
-              <Text style={styles.helpIcon}>•</Text>
-              <Text style={styles.helpText}>Los datos se actualizan automáticamente al sincronizar</Text>
-            </View>
-            <View style={styles.helpItem}>
-              <Text style={styles.helpIcon}>•</Text>
-              <Text style={styles.helpText}>Puedes generar recomendaciones desde el panel del científico</Text>
-            </View>
-          </View>
-        </View>
-      </View>
-
-      {/* 🔽 ESPACIO EN BLANCO PARA SCROLL ADICIONAL */}
       <View style={styles.bottomSpacing} />
     </ScrollView>
   );
 }
 
+// Componentes separados para mejor rendimiento
+const CropDetailsSection = React.memo(({ crop, getStatusColor }) => (
+  <View style={styles.detailsSection}>
+    <Text style={styles.sectionTitle}>📋 Información del Cultivo</Text>
+    
+    <View style={styles.detailsGrid}>
+      {crop.seed && (
+        <DetailCard icon="🌱" label="Semilla" value={crop.seed} />
+      )}
+
+      {crop.bioFertilizer && (
+        <DetailCard icon="🧪" label="Biofertilizante" value={crop.bioFertilizer} />
+      )}
+
+      {crop.humidity && (
+        <DetailCard icon="💧" label="Humedad" value={`${crop.humidity}%`} />
+      )}
+
+      <View style={styles.detailCard}>
+        <Text style={styles.detailCardIcon}>📊</Text>
+        <View style={styles.detailCardContent}>
+          <Text style={styles.detailCardLabel}>Estado</Text>
+          <View style={styles.statusContainer}>
+            <View style={[styles.statusDotSmall, { backgroundColor: getStatusColor(crop.status) }]} />
+            <Text style={styles.detailCardValue}>{crop.status}</Text>
+          </View>
+        </View>
+      </View>
+    </View>
+
+    {crop.observations && (
+      <TextCard title="📝 Observaciones del Agricultor" content={crop.observations} />
+    )}
+
+    {crop.recommendations && (
+      <TextCard title="💡 Notas del Agricultor" content={crop.recommendations} />
+    )}
+  </View>
+));
+
+const DetailCard = React.memo(({ icon, label, value }) => (
+  <View style={styles.detailCard}>
+    <Text style={styles.detailCardIcon}>{icon}</Text>
+    <View style={styles.detailCardContent}>
+      <Text style={styles.detailCardLabel}>{label}</Text>
+      <Text style={styles.detailCardValue}>{value}</Text>
+    </View>
+  </View>
+));
+
+const TextCard = React.memo(({ title, content }) => (
+  <View style={styles.textCard}>
+    <Text style={styles.textCardTitle}>{title}</Text>
+    <Text style={styles.textCardContent}>{content}</Text>
+  </View>
+));
+
+const HistorySection = React.memo(({ history }) => {
+  if (!history || history.length === 0) return null;
+
+  return (
+    <View style={styles.historySection}>
+      <Text style={styles.sectionTitle}>📈 Historial de Acciones</Text>
+      
+      {history.slice(0, 10).map((action, index) => (
+        <ActionCard key={action._id || `action-${index}`} action={action} />
+      ))}
+    </View>
+  );
+});
+
+const ActionCard = React.memo(({ action }) => (
+  <View style={styles.actionCard}>
+    <View style={styles.actionHeader}>
+      <Text style={styles.actionDate}>
+        {action.date ? new Date(action.date).toLocaleDateString('es-MX') : 'Fecha no disponible'}
+      </Text>
+      <View style={[styles.actionTypeBadge, { backgroundColor: '#2196f3' }]}>
+        <Text style={styles.actionTypeText}>ACCIÓN</Text>
+      </View>
+    </View>
+    
+    <Text style={styles.actionText}>{action.action}</Text>
+    
+    {action.observations && (
+      <Text style={styles.actionNotes}>📝 {action.observations}</Text>
+    )}
+    
+    <View style={styles.actionMeta}>
+      {action.seed && <Text style={styles.actionMetaText}>🌱 {action.seed}</Text>}
+      {action.bioFertilizer && <Text style={styles.actionMetaText}>🧪 {action.bioFertilizer}</Text>}
+    </View>
+  </View>
+));
+
+const SyncSection = React.memo(({ synced }) => {
+  if (synced !== false) return null;
+
+  return (
+    <View style={styles.syncSection}>
+      <View style={styles.syncCard}>
+        <Text style={styles.syncIcon}>⚠️</Text>
+        <View style={styles.syncContent}>
+          <Text style={styles.syncTitle}>Pendiente de sincronización</Text>
+          <Text style={styles.syncText}>Este cultivo tiene datos pendientes de sincronizar con el servidor</Text>
+        </View>
+      </View>
+    </View>
+  );
+});
+
+const HelpSection = React.memo(() => (
+  <View style={styles.helpSection}>
+    <View style={styles.helpCard}>
+      <Text style={styles.helpTitle}>💡 Información del Cultivo</Text>
+      <View style={styles.helpList}>
+        <HelpItem text="El historial muestra las últimas 10 acciones registradas" />
+        <HelpItem text="Los datos se actualizan automáticamente al sincronizar" />
+        <HelpItem text="Puedes generar recomendaciones desde el panel del científico" />
+      </View>
+    </View>
+  </View>
+));
+
+const HelpItem = React.memo(({ text }) => (
+  <View style={styles.helpItem}>
+    <Text style={styles.helpIcon}>•</Text>
+    <Text style={styles.helpText}>{text}</Text>
+  </View>
+));
+
+// Estilos (mantenidos iguales pero más organizados)
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -302,7 +318,7 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 10,
   },
-  // 🔹 HEADER - Mismo estilo que Farmer Details
+  // ... (todos los demás estilos se mantienen igual)
   header: {
     backgroundColor: '#7b1fa2',
     padding: 20,
@@ -322,7 +338,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     opacity: 0.9,
   },
-  // 🔹 INFORMACIÓN DE CONEXIÓN - Mismo estilo que Farmer Details
   connectionInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -358,7 +373,6 @@ const styles = StyleSheet.create({
     color: '#ff9800',
     fontWeight: '500',
   },
-  // 🔹 TARJETAS PRINCIPALES - Mismo estilo que Farmer Details
   mainCard: {
     backgroundColor: 'white',
     padding: 16,
@@ -425,7 +439,6 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '600',
   },
-  // 🔹 SECCIONES
   detailsSection: {
     marginBottom: 16,
   },
@@ -441,7 +454,6 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 12,
   },
-  // 🔹 DETALLES EN GRID
   detailsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -489,7 +501,6 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
   },
-  // 🔹 TARJETAS DE TEXTO
   textCard: {
     backgroundColor: 'white',
     padding: 16,
@@ -512,7 +523,6 @@ const styles = StyleSheet.create({
     color: '#666',
     lineHeight: 20,
   },
-  // 🔹 TARJETAS DE ACCIÓN/HISTORIAL
   actionCard: {
     backgroundColor: 'white',
     padding: 16,
@@ -568,7 +578,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#888',
   },
-  // 🔹 SINCRONIZACIÓN
   syncCard: {
     backgroundColor: '#fff3cd',
     padding: 16,
@@ -596,7 +605,6 @@ const styles = StyleSheet.create({
     color: '#856404',
     lineHeight: 16,
   },
-  // 🔹 SECCIÓN DE AYUDA
   helpSection: {
     marginBottom: 16,
   },
@@ -634,7 +642,6 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 20,
   },
-  // 🔹 ESTADOS DE ERROR
   errorText: {
     textAlign: 'center',
     marginTop: 50,
@@ -653,7 +660,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: 'bold',
   },
-  // 🔹 ESPACIO AL FINAL
   bottomSpacing: {
     height: 40,
   },

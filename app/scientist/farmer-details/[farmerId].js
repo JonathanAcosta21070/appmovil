@@ -1,17 +1,19 @@
-import React, { useState, useEffect } from 'react';
+// app/scientist/farmer-details.js
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
-  View, 
-  Text, 
-  ScrollView, 
-  StyleSheet, 
-  TouchableOpacity, 
-  Alert,
-  RefreshControl,
-  ActivityIndicator 
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert,
+  RefreshControl, ActivityIndicator 
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSync } from '../../../contexts/SyncContext';
 import { scientistService } from '../../../services/scientistService';
+
+const CROP_STATUS_COLORS = {
+  activo: '#4caf50',
+  cosechado: '#ff9800',
+  abandonado: '#f44336',
+  default: '#666'
+};
 
 export default function FarmerDetails() {
   const { farmerId } = useLocalSearchParams();
@@ -21,23 +23,15 @@ export default function FarmerDetails() {
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   
-  // 🔹 Usar el contexto global - Mismo estilo que Home Scientist
-  const { 
-    isConnected, 
-    isSyncing, 
-    unsyncedCount, 
-    user 
-  } = useSync();
+  const { isConnected, unsyncedCount, user } = useSync();
 
-  useEffect(() => {
-    loadFarmerDetails();
-  }, [farmerId]);
+  const getCropStatusColor = useCallback((status) => {
+    return CROP_STATUS_COLORS[status?.toLowerCase()] || CROP_STATUS_COLORS.default;
+  }, []);
 
-  const loadFarmerDetails = async () => {
+  const loadFarmerDetails = useCallback(async () => {
     try {
       setIsLoading(true);
-      
-      console.log('🔄 Cargando detalles del agricultor:', farmerId);
       
       const [farmerData, cropsData, sensorData] = await Promise.all([
         scientistService.getFarmerDetails(user.id, farmerId),
@@ -49,40 +43,38 @@ export default function FarmerDetails() {
       setCrops(cropsData || []);
       setSensorData(sensorData || []);
 
-      console.log('✅ Detalles cargados:', {
-        farmer: farmerData?.name,
-        crops: cropsData?.length || 0,
-        sensorData: sensorData?.length || 0
-      });
-
     } catch (error) {
-      console.log('❌ Error cargando detalles del agricultor:', error);
       Alert.alert('Error', 'No se pudieron cargar los detalles del agricultor');
     } finally {
       setIsLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [farmerId, user.id]);
 
-  const onRefresh = async () => {
+  useEffect(() => {
+    loadFarmerDetails();
+  }, [loadFarmerDetails]);
+
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadFarmerDetails();
-  };
+  }, [loadFarmerDetails]);
 
-  const getLatestSensorData = (cropName, location) => {
+  const getLatestSensorData = useCallback((cropName, location) => {
     return sensorData.find(data => 
       data.crop === cropName && data.location === location
     );
-  };
+  }, [sensorData]);
 
-  const getCropStatusColor = (status) => {
-    switch (status?.toLowerCase()) {
-      case 'activo': return '#4caf50';
-      case 'cosechado': return '#ff9800';
-      case 'abandonado': return '#f44336';
-      default: return '#666';
-    }
-  };
+
+  const HeaderSection = useMemo(() => (
+    <View style={styles.header}>
+      <Text style={styles.title}>👨‍🌾 Detalles del Agricultor</Text>
+      <Text style={styles.subtitle}>
+        Información completa y cultivos
+      </Text>
+    </View>
+  ), []);
 
   if (isLoading && !refreshing) {
     return (
@@ -113,31 +105,10 @@ export default function FarmerDetails() {
       }
       showsVerticalScrollIndicator={true}
     >
-      {/* 🔹 Header - Mismo estilo que Home Scientist */}
-      <View style={styles.header}>
-        <Text style={styles.title}>👨‍🌾 Detalles del Agricultor</Text>
-        <Text style={styles.subtitle}>
-          Información completa y cultivos
-        </Text>
-      </View>
+      {HeaderSection}
 
-      {/* 🔹 Información de conexión - Mismo estilo que Home Scientist */}
-      <View style={styles.connectionInfo}>
-        <View style={styles.connectionStatus}>
-          <View style={[styles.statusDot, isConnected ? styles.statusOnline : styles.statusOffline]} />
-          <Text style={styles.statusText}>
-            {isConnected ? 'Conectado' : 'Sin conexión'}
-          </Text>
-        </View>
-        
-        {unsyncedCount > 0 && (
-          <Text style={styles.unsyncedText}>
-            📱 {unsyncedCount} pendientes
-          </Text>
-        )}
-      </View>
 
-      {/* 🔹 Tarjeta principal de información - Mismo estilo que Home Scientist */}
+      {/* Tarjeta principal */}
       <View style={styles.mainCard}>
         <View style={styles.cardHeader}>
           <View style={styles.cardTitleContainer}>
@@ -174,118 +145,141 @@ export default function FarmerDetails() {
         </View>
       </View>
 
-      {/* 🔹 Cultivos del Agricultor - Mismo estilo de tarjetas */}
-      <View style={styles.cropsSection}>
-        <Text style={styles.sectionTitle}>🌱 Cultivos del Agricultor</Text>
-        
-        {crops.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyIcon}>🌱</Text>
-            <Text style={styles.emptyText}>No hay cultivos activos</Text>
-            <Text style={styles.emptySubtext}>
-              Este agricultor no tiene cultivos registrados
-            </Text>
-          </View>
-        ) : (
-          crops.map((crop) => {
-            const latestData = getLatestSensorData(crop.crop, crop.location);
-            return (
-              <TouchableOpacity 
-                key={crop._id}
-                style={styles.cropCard}
-                onPress={() => router.push(`/scientist/crop-details/${crop._id}`)}
-              >
-                <View style={styles.cardHeader}>
-                  <View style={styles.cardTitleContainer}>
-                    <Text style={styles.cardIcon}>🌿</Text>
-                    <View style={styles.cardTitleText}>
-                      <Text style={styles.cardName}>{crop.crop}</Text>
-                      <Text style={styles.cardSubtitle}>
-                        📍 {crop.location}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={[styles.statusBadge, { backgroundColor: getCropStatusColor(crop.status) }]}>
-                    <Text style={styles.statusText}>
-                      {crop.status?.toUpperCase() || 'ACTIVO'}
-                    </Text>
-                  </View>
-                </View>
+      {/* Cultivos */}
+      <CropsSection 
+        crops={crops} 
+        getLatestSensorData={getLatestSensorData}
+        getCropStatusColor={getCropStatusColor}
+      />
 
-                <View style={styles.cropDetails}>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Iniciado:</Text>
-                    <Text style={styles.detailValue}>
-                      {crop.sowingDate ? new Date(crop.sowingDate).toLocaleDateString('es-MX') : 'No especificado'}
-                    </Text>
-                  </View>
+      {/* Ayuda */}
+      <HelpSection />
 
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Acciones:</Text>
-                    <Text style={styles.detailValue}>
-                      {crop.history?.length || 0} registradas
-                    </Text>
-                  </View>
-
-                  {latestData && (
-                    <>
-                      <View style={styles.detailRow}>
-                        <Text style={styles.detailLabel}>Humedad:</Text>
-                        <Text style={[styles.detailValue, { color: '#2196f3' }]}>
-                          {latestData.moisture}%
-                        </Text>
-                      </View>
-                      <View style={styles.detailRow}>
-                        <Text style={styles.detailLabel}>Temperatura:</Text>
-                        <Text style={[styles.detailValue, { color: '#ff9800' }]}>
-                          {latestData.temperature}°C
-                        </Text>
-                      </View>
-                    </>
-                  )}
-
-                  {crop.bioFertilizer && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Biofertilizante:</Text>
-                      <Text style={styles.detailValue}>
-                        {crop.bioFertilizer}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </TouchableOpacity>
-            );
-          })
-        )}
-      </View>
-
-      {/* 🔹 Información adicional - Mismo estilo que Home Scientist */}
-      <View style={styles.helpSection}>
-        <View style={styles.helpCard}>
-          <Text style={styles.helpTitle}>💡 Información del Agricultor</Text>
-          <View style={styles.helpList}>
-            <View style={styles.helpItem}>
-              <Text style={styles.helpIcon}>•</Text>
-              <Text style={styles.helpText}>Toca un cultivo para ver detalles completos</Text>
-            </View>
-            <View style={styles.helpItem}>
-              <Text style={styles.helpIcon}>•</Text>
-              <Text style={styles.helpText}>Los datos de sensores se actualizan automáticamente</Text>
-            </View>
-            <View style={styles.helpItem}>
-              <Text style={styles.helpIcon}>•</Text>
-              <Text style={styles.helpText}>Puedes generar recomendaciones desde el panel principal</Text>
-            </View>
-          </View>
-        </View>
-      </View>
-
-      {/* 🔽 ESPACIO EN BLANCO PARA SCROLL ADICIONAL */}
       <View style={styles.bottomSpacing} />
     </ScrollView>
   );
 }
 
+const CropsSection = React.memo(({ crops, getLatestSensorData, getCropStatusColor }) => (
+  <View style={styles.cropsSection}>
+    <Text style={styles.sectionTitle}>🌱 Cultivos del Agricultor</Text>
+    
+    {crops.length === 0 ? (
+      <EmptyCropsCard />
+    ) : (
+      crops.map((crop) => (
+        <CropCard 
+          key={crop._id}
+          crop={crop}
+          getLatestSensorData={getLatestSensorData}
+          getCropStatusColor={getCropStatusColor}
+        />
+      ))
+    )}
+  </View>
+));
+
+const CropCard = React.memo(({ crop, getLatestSensorData, getCropStatusColor }) => {
+  const latestData = getLatestSensorData(crop.crop, crop.location);
+  
+  return (
+    <TouchableOpacity 
+      style={styles.cropCard}
+      onPress={() => router.push(`/scientist/crop-details/${crop._id}`)}
+    >
+      <View style={styles.cardHeader}>
+        <View style={styles.cardTitleContainer}>
+          <Text style={styles.cardIcon}>🌿</Text>
+          <View style={styles.cardTitleText}>
+            <Text style={styles.cardName}>{crop.crop}</Text>
+            <Text style={styles.cardSubtitle}>
+              📍 {crop.location}
+            </Text>
+          </View>
+        </View>
+        <View style={[styles.statusBadge, { backgroundColor: getCropStatusColor(crop.status) }]}>
+          <Text style={styles.statusText}>
+            {crop.status?.toUpperCase() || 'ACTIVO'}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.cropDetails}>
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Iniciado:</Text>
+          <Text style={styles.detailValue}>
+            {crop.sowingDate ? new Date(crop.sowingDate).toLocaleDateString('es-MX') : 'No especificado'}
+          </Text>
+        </View>
+
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Acciones:</Text>
+          <Text style={styles.detailValue}>
+            {crop.history?.length || 0} registradas
+          </Text>
+        </View>
+
+        {latestData && (
+          <>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Humedad:</Text>
+              <Text style={[styles.detailValue, { color: '#2196f3' }]}>
+                {latestData.moisture}%
+              </Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Temperatura:</Text>
+              <Text style={[styles.detailValue, { color: '#ff9800' }]}>
+                {latestData.temperature}°C
+              </Text>
+            </View>
+          </>
+        )}
+
+        {crop.bioFertilizer && (
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Biofertilizante:</Text>
+            <Text style={styles.detailValue}>
+              {crop.bioFertilizer}
+            </Text>
+          </View>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+const EmptyCropsCard = React.memo(() => (
+  <View style={styles.emptyCard}>
+    <Text style={styles.emptyIcon}>🌱</Text>
+    <Text style={styles.emptyText}>No hay cultivos activos</Text>
+    <Text style={styles.emptySubtext}>
+      Este agricultor no tiene cultivos registrados
+    </Text>
+  </View>
+));
+
+const HelpSection = React.memo(() => (
+  <View style={styles.helpSection}>
+    <View style={styles.helpCard}>
+      <Text style={styles.helpTitle}>💡 Información del Agricultor</Text>
+      <View style={styles.helpList}>
+        <HelpItem text="Toca un cultivo para ver detalles completos" />
+        <HelpItem text="Los datos de sensores se actualizan automáticamente" />
+        <HelpItem text="Puedes generar recomendaciones desde el panel principal" />
+      </View>
+    </View>
+  </View>
+));
+
+const HelpItem = React.memo(({ text }) => (
+  <View style={styles.helpItem}>
+    <Text style={styles.helpIcon}>•</Text>
+    <Text style={styles.helpText}>{text}</Text>
+  </View>
+));
+
+// Estilos (iguales al original)
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -306,7 +300,6 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 10,
   },
-  // 🔹 HEADER - Mismo estilo que Home Scientist
   header: {
     backgroundColor: '#7b1fa2',
     padding: 20,
@@ -326,7 +319,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     opacity: 0.9,
   },
-  // 🔹 INFORMACIÓN DE CONEXIÓN - Mismo estilo que Home Scientist
   connectionInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -362,7 +354,6 @@ const styles = StyleSheet.create({
     color: '#ff9800',
     fontWeight: '500',
   },
-  // 🔹 TARJETAS PRINCIPALES - Mismo estilo que Home Scientist
   mainCard: {
     backgroundColor: 'white',
     padding: 16,
@@ -429,7 +420,6 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '600',
   },
-  // 🔹 SECCIONES
   cropsSection: {
     marginBottom: 16,
   },
@@ -439,7 +429,6 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 12,
   },
-  // 🔹 TARJETAS DE CULTIVOS
   cropCard: {
     backgroundColor: 'white',
     padding: 16,
@@ -456,7 +445,6 @@ const styles = StyleSheet.create({
   cropDetails: {
     marginTop: 12,
   },
-  // 🔹 ESTADOS DE CARGA Y VACÍO
   emptyCard: {
     backgroundColor: 'white',
     padding: 40,
@@ -480,7 +468,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontStyle: 'italic',
   },
-  // 🔹 SECCIÓN DE AYUDA
   helpSection: {
     marginBottom: 16,
   },
@@ -518,7 +505,6 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 20,
   },
-  // 🔹 ESTADOS DE ERROR
   errorText: {
     textAlign: 'center',
     marginTop: 50,
@@ -537,7 +523,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: 'bold',
   },
-  // 🔹 ESPACIO AL FINAL
   bottomSpacing: {
     height: 40,
   },

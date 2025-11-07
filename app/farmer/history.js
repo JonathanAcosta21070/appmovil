@@ -552,22 +552,6 @@ export default function History() {
         </Text>
       </View>
 
-      {/* 🔹 Información de conexión - Mismo estilo que Home Farmer */}
-      <View style={styles.connectionInfo}>
-        <View style={styles.connectionStatus}>
-          <View style={[styles.statusDot, isConnected ? styles.statusOnline : styles.statusOffline]} />
-          <Text style={styles.statusText}>
-            {isConnected ? 'Conectado' : 'Sin conexión'}
-          </Text>
-        </View>
-        
-        {actualPendingSyncCount > 0 && (
-          <Text style={styles.unsyncedText}>
-            📱 {actualPendingSyncCount} pendientes
-          </Text>
-        )}
-      </View>
-
       {/* 🔹 Tarjeta de estadísticas - Mismo estilo que Home Farmer */}
       <View style={styles.mainCard}>
         <View style={styles.cardHeader}>
@@ -768,6 +752,30 @@ export default function History() {
           </View>
         )}
       </View>
+      
+            {/* Información adicional */}
+      <View style={styles.helpSection}>
+        <View style={styles.helpCard}>
+          <Text style={styles.helpTitle}>💡 Información Importante</Text>
+          <View style={styles.helpList}>
+            {[
+        '📋 Aquí puedes ver todas las acciones que has registrado, como riegos, siembras o fertilizaciones.',
+        '🕒 Las acciones se muestran en orden cronológico, empezando por las más recientes.',
+        '🌾 Cada tarjeta muestra el nombre del cultivo, el tipo de acción y la fecha en que fue realizada.',
+        '🗑️ Desde aquí también podrás eliminar registros que ya no necesites conservar.',
+        '📶 Si estabas sin conexión al registrar, el historial mostrará la acción pendiente hasta que se sincronice.',
+      ]
+      .map((text, index) => (
+              <View key={index} style={styles.helpItem}>
+                <Text style={styles.helpIcon}>•</Text>
+                <Text style={styles.helpText}>{text}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      </View>
+
+      
 
       {/* 🔹 Espacio al final para mejor scroll */}
       <View style={styles.bottomSpacing} />
@@ -1046,4 +1054,46 @@ const styles = StyleSheet.create({
   bottomSpacing: {
     height: 40,
   },
+  // 🔹 SECCIÓN DE AYUDA / GUÍA DE USO
+helpSection: {
+  marginBottom: 16,
+},
+helpCard: {
+  backgroundColor: 'white',
+  padding: 16,
+  borderRadius: 12,
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 2 },
+  shadowOpacity: 0.1,
+  shadowRadius: 4,
+  elevation: 3,
+},
+helpTitle: {
+  fontSize: 18,
+  fontWeight: 'bold',
+  color: '#333',
+  marginBottom: 12,
+  textAlign: 'left',
+},
+helpList: {
+  gap: 8, // Espaciado entre elementos
+},
+helpItem: {
+  flexDirection: 'row',
+  alignItems: 'flex-start',
+  marginBottom: 4,
+},
+helpIcon: {
+  marginRight: 8,
+  fontSize: 14,
+  color: '#2e7d32', // tono verde para íconos o bullets
+  marginTop: 3,
+},
+helpText: {
+  fontSize: 14,
+  color: '#555',
+  flex: 1,
+  lineHeight: 20,
+  textAlign: 'justify',
+},
 });

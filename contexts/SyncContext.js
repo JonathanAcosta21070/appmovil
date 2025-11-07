@@ -54,19 +54,29 @@ export const SyncProvider = ({ children }) => {
     return () => unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (!isConnected || !user?.id || refreshInProgress.current) return;
+useEffect(() => {
+  if (!isConnected || !user?.id || refreshInProgress.current) return;
 
-    const needsRefresh = !lastCacheUpdate || (Date.now() - lastCacheUpdate > 300000);
+  const needsRefresh = !lastCacheUpdate || (Date.now() - lastCacheUpdate > 300000);
+  
+  if (needsRefresh && !refreshInProgress.current) {
+    console.log('🔄 Cache necesita actualización, refrescando...');
+    refreshInProgress.current = true;
     
-    if (needsRefresh) {
-      console.log('🔄 Cache necesita actualización, refrescando...');
-      refreshInProgress.current = true;
-      refreshCache().finally(() => {
+    const refreshCacheSafely = async () => {
+      try {
+        await refreshCache();
+      } catch (error) {
+        console.log('❌ Error en refresh cache:', error);
+      } finally {
         refreshInProgress.current = false;
-      });
-    }
-  }, [isConnected, user, lastCacheUpdate]);
+        setLastCacheUpdate(Date.now());
+      }
+    };
+    
+    refreshCacheSafely();
+  }
+}, [isConnected, user, lastCacheUpdate]);
 
   // 🔧 FUNCIÓN: VERIFICAR DATOS PENDIENTES - ESTA ES LA QUE FALTABA
   const checkPendingSync = async () => {
@@ -80,6 +90,28 @@ export const SyncProvider = ({ children }) => {
       console.log('❌ Error verificando datos pendientes:', error);
       setPendingSyncCount(0);
       return 0;
+    }
+  };
+  // 🔧 FUNCIÓN: CARGAR USUARIO - ESTA ES LA QUE FALTABA EN EL VALUE
+  const loadUser = async () => {
+    try {
+      console.log('🔄 Cargando usuario desde AsyncStorage...');
+      const userData = await AsyncStorage.getItem('user');
+      
+      if (userData) {
+        const userObj = JSON.parse(userData);
+        setUser(userObj);
+        console.log('✅ Usuario cargado:', userObj.email);
+        return userObj;
+      } else {
+        console.log('📭 No hay usuario guardado');
+        setUser(null);
+        return null;
+      }
+    } catch (error) {
+      console.log('❌ Error cargando usuario:', error);
+      setUser(null);
+      return null;
     }
   };
 
@@ -96,66 +128,42 @@ export const SyncProvider = ({ children }) => {
     }
   };
 
-  // 🔧 FUNCIÓN: CARGAR USUARIO
-  const loadUser = async () => {
-    try {
-      const userData = await AsyncStorage.getItem('user');
-      if (userData) {
-        const userObj = JSON.parse(userData);
-        setUser(userObj);
-        console.log('✅ Usuario cargado:', userObj.email);
-      }
-    } catch (error) {
-      console.log('❌ Error cargando usuario:', error);
-    }
-  };
 
   // FUNCIÓN PARA ACTUALIZAR EL CACHE CON DATOS ACTUALES
   const refreshCache = async () => {
-    if (!user?.id || !isConnected || refreshInProgress.current) {
-      console.log('🚫 Refresh cache cancelado - ya en progreso o sin conexión');
-      return;
-    }
+  if (!user?.id || !isConnected) {
+    console.log('🚫 Refresh cache cancelado - sin usuario o conexión');
+    return;
+  }
+  
+  try {
+    console.log('🔄 Actualizando cache...');
     
-    try {
-      console.log('🔄 Actualizando cache con datos actuales del servidor...');
-      
-      const localCrops = await getLocalCrops();
-      const url = `${API_BASE_URL}/farmer/crops`;
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Authorization': user.id.toString(),
-          'Content-Type': 'application/json'
-        },
-        timeout: 10000
-      });
-
-      if (response.ok) {
-        const serverData = await response.json();
-        console.log('✅ Datos actuales del servidor:', serverData.length);
-        
-        const localUnsynced = localCrops.filter(crop => !crop.synced);
-        const allData = [...serverData, ...localUnsynced];
-        
-        const activeCrops = allData.filter(crop => 
-          crop.status?.toLowerCase() === 'activo' || 
-          crop._source === 'local' ||
-          !crop.synced
-        );
-        
-        await cacheUserCrops(activeCrops);
-        setLastCacheUpdate(Date.now());
-        
-        console.log('💾 Cache actualizado con datos actuales:', activeCrops.length);
-      } else {
-        console.log('❌ Error en respuesta del servidor:', response.status);
+    const localCrops = await getLocalCrops();
+    const url = `${API_BASE_URL}/farmer/crops`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': user.id.toString(),
+        'Content-Type': 'application/json'
       }
-    } catch (error) {
-      console.log('❌ Error actualizando cache:', error);
+    });
+
+    if (response.ok) {
+      const serverData = await response.json();
+      console.log('✅ Datos del servidor recibidos:', serverData.length);
+      
+      const localUnsynced = localCrops.filter(crop => !crop.synced);
+      const allData = [...serverData, ...localUnsynced];
+      
+      await cacheUserCrops(allData);
+      console.log('💾 Cache actualizado correctamente');
     }
-  };
+  } catch (error) {
+    console.log('❌ Error actualizando cache:', error.message);
+  }
+};
 
   // CARGAR CULTIVOS EN CACHE
   const loadCachedCrops = async (forceRefresh = false) => {
@@ -748,13 +756,14 @@ const repairLocalData = async () => {
     API_BASE_URL,
     cachedCrops,
     
-    // Funciones
+    // Funciones - ✅ AGREGAR loadUser AQUÍ
+    loadUser, // ← ESTA ES LA LÍNEA QUE FALTABA
     saveUser,
     logout,
     getUserCrops,
     saveCropLocal,
     syncPendingData,
-    checkPendingSync, // ✅ AHORA ESTÁ DEFINIDA
+    checkPendingSync,
     deleteLocalCrop,
     getLocalCrops,
     generateActionDescription,
@@ -763,7 +772,7 @@ const repairLocalData = async () => {
     loadCachedCrops,
     refreshCache,
     cleanDeletedCropsFromCache
-  };
+};
 
   return (
     <SyncContext.Provider value={value}>

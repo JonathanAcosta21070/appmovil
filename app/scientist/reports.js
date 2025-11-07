@@ -1,15 +1,8 @@
-// app/scientist/reports.js - VERSIÓN CON ESTILO DE HOME SCIENTIST
-import React, { useState, useEffect } from 'react';
+// app/scientist/reports.js - VERSIÓN CON AGRUPACIÓN DE BIOFERTILIZANTES
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
-  View, 
-  Text, 
-  ScrollView, 
-  StyleSheet, 
-  Alert, 
-  Dimensions,
-  ActivityIndicator,
-  RefreshControl,
-  TouchableOpacity 
+  View, Text, ScrollView, StyleSheet, Alert, Dimensions,
+  ActivityIndicator, RefreshControl, TouchableOpacity 
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSync } from '../../contexts/SyncContext';
@@ -17,8 +10,24 @@ import { scientistService } from '../../services/scientistService';
 
 const screenWidth = Dimensions.get('window').width;
 
-// 🔥 Componente para Ranking de Agricultores - ACTUALIZADO
-const FarmersRankingChart = ({ data, title }) => {
+// Constantes para colores
+const CHART_COLORS = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40'];
+
+// Componente de tarjeta de estadística optimizado
+const StatCard = React.memo(({ title, value, icon = "📊" }) => (
+  <View style={styles.statCard}>
+    <View style={styles.statContent}>
+      <Text style={styles.statIcon}>{icon}</Text>
+      <View style={styles.statTextContainer}>
+        <Text style={styles.statNumber}>{value}</Text>
+        <Text style={styles.statLabel} numberOfLines={2}>{title}</Text>
+      </View>
+    </View>
+  </View>
+));
+
+// Componente de gráfica de ranking optimizado
+const FarmersRankingChart = React.memo(({ data, title }) => {
   const [ChartComponent, setChartComponent] = useState(null);
   const [error, setError] = useState(false);
 
@@ -99,22 +108,35 @@ const FarmersRankingChart = ({ data, title }) => {
         yAxisSuffix=""
       />
       
-      <View style={styles.rankingLegend}>
-        <Text style={styles.legendTitle}>🏆 Top Agricultores</Text>
-        {data.slice(0, 5).map((farmer, index) => (
-          <View key={index} style={styles.rankingItem}>
-            <Text style={styles.rankingPosition}>#{index + 1}</Text>
-            <Text style={styles.rankingName}>{farmer.name || farmer.nombre}</Text>
-            <Text style={styles.rankingProjects}>{farmer.totalProyectos || farmer.projectCount || 0} proy.</Text>
-          </View>
-        ))}
-      </View>
+      <RankingLegend data={data.slice(0, 5)} />
     </View>
   );
-};
+});
 
-// 🔥 Componente para Biofertilizantes
-const BiofertilizerChart = ({ data, title }) => {
+const RankingLegend = React.memo(({ data }) => (
+  <View style={styles.rankingLegend}>
+    <Text style={styles.legendTitle}>🏆 Top Agricultores</Text>
+    {data.map((farmer, index) => (
+      <RankingItem 
+        key={index}
+        position={index + 1}
+        name={farmer.name || farmer.nombre}
+        projects={farmer.totalProyectos || farmer.projectCount || 0}
+      />
+    ))}
+  </View>
+));
+
+const RankingItem = React.memo(({ position, name, projects }) => (
+  <View style={styles.rankingItem}>
+    <Text style={styles.rankingPosition}>#{position}</Text>
+    <Text style={styles.rankingName}>{name}</Text>
+    <Text style={styles.rankingProjects}>{projects} proy.</Text>
+  </View>
+));
+
+// Componente de gráfica de biofertilizantes optimizado - VERSIÓN CORREGIDA
+const BiofertilizerChart = React.memo(({ data, title }) => {
   const [ChartComponent, setChartComponent] = useState(null);
   const [error, setError] = useState(false);
 
@@ -122,15 +144,12 @@ const BiofertilizerChart = ({ data, title }) => {
     const loadChart = async () => {
       try {
         const chartKit = await import('react-native-chart-kit');
-        
         if (chartKit.PieChart) {
           setChartComponent(() => chartKit.PieChart);
         } else {
-          console.log('❌ PieChart no encontrado en react-native-chart-kit');
           setError(true);
         }
       } catch (err) {
-        console.log('❌ Error cargando PieChart:', err);
         setError(true);
       }
     };
@@ -138,12 +157,55 @@ const BiofertilizerChart = ({ data, title }) => {
     loadChart();
   }, []);
 
-  if (error || !data || data.length === 0) {
+  // 🔥 CORRECCIÓN: Agrupar biofertilizantes iguales
+  const groupedBiofertilizers = useMemo(() => {
+    if (!data || data.length === 0) return [];
+
+    const grouped = {};
+    
+    data.forEach(item => {
+      // Normalizar el nombre del biofertilizante (minúsculas, sin espacios extras)
+      const bioName = (item.biofertilizante || 'No especificado')
+        .toString()
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, ' '); // Eliminar espacios múltiples
+      
+      const count = item.totalProyectos || 1;
+      
+      if (grouped[bioName]) {
+        // Si ya existe, sumar los proyectos
+        grouped[bioName] += count;
+      } else {
+        // Si no existe, crear nueva entrada
+        grouped[bioName] = count;
+      }
+    });
+
+    // Convertir el objeto agrupado a array y ordenar por cantidad (descendente)
+    return Object.entries(grouped)
+      .map(([name, totalProyectos]) => ({
+        biofertilizante: name,
+        totalProyectos: totalProyectos
+      }))
+      .sort((a, b) => b.totalProyectos - a.totalProyectos);
+  }, [data]);
+
+  console.log('🧪 [DEBUG] Biofertilizantes agrupados:', {
+    original: data?.length || 0,
+    agrupados: groupedBiofertilizers.length,
+    datos: groupedBiofertilizers
+  });
+
+  if (error || !groupedBiofertilizers || groupedBiofertilizers.length === 0) {
     return (
       <View style={styles.chartErrorContainer}>
         <Text style={styles.chartErrorText}>🧪 Gráfica no disponible</Text>
         <Text style={styles.chartErrorSubtext}>
-          {!data || data.length === 0 ? 'No hay datos de biofertilizantes' : 'Error cargando gráfica'}
+          {!groupedBiofertilizers || groupedBiofertilizers.length === 0 
+            ? 'No hay datos de biofertilizantes' 
+            : 'Error cargando gráfica'
+          }
         </Text>
       </View>
     );
@@ -158,14 +220,10 @@ const BiofertilizerChart = ({ data, title }) => {
     );
   }
 
-  // Colores para los biofertilizantes
-  const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40'];
-
-  // Preparar datos para la gráfica de pastel
-  const pieData = data.map((item, index) => ({
-    name: item.biofertilizante || 'No especificado',
-    population: item.totalProyectos || 1, // Mínimo 1 para evitar errores
-    color: colors[index % colors.length],
+  const pieData = groupedBiofertilizers.map((item, index) => ({
+    name: item.biofertilizante.charAt(0).toUpperCase() + item.biofertilizante.slice(1), // Capitalizar primera letra
+    population: item.totalProyectos,
+    color: CHART_COLORS[index % CHART_COLORS.length],
     legendFontColor: '#7F7F7F',
     legendFontSize: 10,
   }));
@@ -190,38 +248,48 @@ const BiofertilizerChart = ({ data, title }) => {
         absolute
       />
       
-      {/* Estadísticas adicionales */}
-      <View style={styles.biofertilizerStats}>
-        <Text style={styles.statsTitle}>📈 Resumen de Biofertilizantes</Text>
-        <View style={styles.statsGrid}>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{data.length}</Text>
-            <Text style={styles.statLabel}>Tipos</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>
-              {data.reduce((sum, item) => sum + (item.totalProyectos || 0), 0)}
-            </Text>
-            <Text style={styles.statLabel}>Proyectos</Text>
-          </View>
-        </View>
-      </View>
+      <BiofertilizerStats data={groupedBiofertilizers} originalData={data} />
     </View>
   );
-};
+});
 
-// Componente de tarjeta de estadística - ACTUALIZADO CON ESTILO HOME SCIENTIST
-const StatCard = ({ title, value, subtitle, color = '#7b1fa2' }) => (
-  <View style={styles.statCard}>
-    <View style={styles.statContent}>
-      <Text style={styles.statIcon}>📊</Text>
-      <View style={styles.statTextContainer}>
-        <Text style={styles.statNumber}>{value}</Text>
-        <Text style={styles.statLabel} numberOfLines={2}>{title}</Text>
-      </View>
+const BiofertilizerStats = React.memo(({ data, originalData }) => (
+  <View style={styles.biofertilizerStats}>
+    <Text style={styles.statsTitle}>📈 Resumen de Biofertilizantes</Text>
+    <View style={styles.statsGrid}>
+      <StatItem value={data.length} label="Tipos únicos" />
+      <StatItem 
+        value={data.reduce((sum, item) => sum + (item.totalProyectos || 0), 0)} 
+        label="Total usos" 
+      />
+    </View>
+    
+
+    
+    {/* 🔥 NUEVO: Lista de biofertilizantes agrupados */}
+    <View style={styles.biofertilizerList}>
+      <Text style={styles.listTitle}>🧪 Biofertilizantes registrados:</Text>
+      {data.slice(0, 5).map((item, index) => (
+        <View key={index} style={styles.biofertilizerItem}>
+          <Text style={styles.biofertilizerName}>
+            {item.biofertilizante.charAt(0).toUpperCase() + item.biofertilizante.slice(1)}
+          </Text>
+          <Text style={styles.biofertilizerCount}>{item.totalProyectos} usos</Text>
+        </View>
+      ))}
+      {data.length > 5 && (
+        <Text style={styles.moreText}>... y {data.length - 5} más</Text>
+      )}
     </View>
   </View>
-);
+));
+
+const StatItem = React.memo(({ value, label }) => (
+  <View style={styles.statItem}>
+    <Text style={styles.statNumber}>{value}</Text>
+    <Text style={styles.statLabel}>{label}</Text>
+  </View>
+));
 
 export default function Reports() {
   const [rankingData, setRankingData] = useState([]);
@@ -229,34 +297,14 @@ export default function Reports() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   
-  // 🔹 Usar el contexto global - Mismo estilo que Home Scientist
-  const { 
-    isConnected, 
-    isSyncing, 
-    unsyncedCount, 
-    user 
-  } = useSync();
+  const { isConnected, unsyncedCount, user } = useSync();
 
-  useEffect(() => {
-    loadGlobalStats();
-  }, []);
-
-  // 🔥 CORRECCIÓN PRINCIPAL: Método actualizado para obtener farmers
-  const loadGlobalStats = async () => {
+  // Función optimizada para cargar estadísticas
+  const loadGlobalStats = useCallback(async () => {
     try {
       setLoading(true);
-      console.log('📊 [REPORTS] Iniciando carga de estadísticas...');
       
-      // 🔍 DEBUG: Verificar el usuario actual
-      console.log('🔍 [DEBUG] Usuario actual:', {
-        hasUser: !!user,
-        userId: user?.id,
-        userRole: user?.role
-      });
-      
-      // Validar que tenemos un usuario con ID válido
       if (!user?.id) {
-        console.log('❌ [REPORTS] No hay usuario autenticado');
         Alert.alert(
           'Sesión requerida', 
           'Por favor, inicia sesión para ver los reportes',
@@ -265,125 +313,169 @@ export default function Reports() {
         return;
       }
       
-      // Validar que el ID sea un ObjectId válido
       const isValidId = user.id.match(/^[0-9a-fA-F]{24}$/);
       if (!isValidId) {
-        console.log('❌ [REPORTS] ID de usuario inválido:', user.id);
         Alert.alert('Error', 'ID de usuario inválido. Por favor, vuelve a iniciar sesión.');
         return;
       }
       
-      console.log('✅ [REPORTS] ID válido, solicitando estadísticas...');
-      
-      // 🔥 NUEVO MÉTODO: Obtener farmers primero como en farmer-details.js
       const farmers = await scientistService.getFarmers(user.id);
-      console.log('✅ [REPORTS] Agricultores obtenidos:', farmers?.length || 0);
 
       if (!farmers || farmers.length === 0) {
         setRankingData([]);
-        // Mantener biofertilizerData como estaba
-        let biofertilizers = [];
-        try {
-          biofertilizers = await scientistService.getBiofertilizerStats(user.id);
-        } catch (e) {
-          console.log('⚠️ No se pudieron obtener biofertilizantes');
-        }
-        setBiofertilizerData(biofertilizers);
+        await loadBiofertilizerData([]);
         return;
       }
 
-      // 🔥 PROCESAR FARMERS PARA RANKING
-      const rankingPromises = farmers.map(async (farmer) => {
-        try {
-          // Obtener cultivos de cada agricultor - igual que en farmer-details.js
-          const crops = await scientistService.getFarmerCrops(user.id, farmer._id || farmer.id);
-          return {
-            id: farmer._id || farmer.id,
-            nombre: farmer.name || farmer.nombre,
-            email: farmer.email,
-            ubicacion: farmer.ubicacion,
-            totalProyectos: crops?.length || 0,
-            cultivos: crops || []
-          };
-        } catch (error) {
-          console.log(`Error obteniendo cultivos para ${farmer.name}:`, error);
-          return {
-            id: farmer._id || farmer.id,
-            nombre: farmer.name || farmer.nombre,
-            totalProyectos: 0,
-            cultivos: []
-          };
-        }
-      });
-
-      const rankingResults = await Promise.all(rankingPromises);
-      
-      // Ordenar por total de proyectos (ranking)
+      const rankingResults = await processFarmersData(farmers, user.id);
       const sortedRanking = rankingResults
         .filter(farmer => farmer.totalProyectos > 0)
         .sort((a, b) => b.totalProyectos - a.totalProyectos);
 
       setRankingData(sortedRanking);
+      await loadBiofertilizerData(sortedRanking);
 
-      // 🔥 OBTENER BIOFERTILIZANTES (método original)
-      let biofertilizers = [];
-      try {
-        biofertilizers = await scientistService.getBiofertilizerStats(user.id);
-      } catch (e) {
-        console.log('⚠️ [REPORTS] Error con getBiofertilizerStats, usando datos de cultivos...');
-        // Método alternativo: extraer de los cultivos obtenidos
-        const allCrops = rankingResults.flatMap(farmer => farmer.cultivos);
-        const biofertilizerStats = {};
-        allCrops.forEach(crop => {
-          const biofertilizer = crop.biofertilizante || crop.fertilizer || 'No especificado';
-          if (!biofertilizerStats[biofertilizer]) {
-            biofertilizerStats[biofertilizer] = 0;
-          }
-          biofertilizerStats[biofertilizer]++;
-        });
-
-        biofertilizers = Object.entries(biofertilizerStats).map(([name, count]) => ({
-          biofertilizante: name,
-          totalProyectos: count
-        }));
-      }
-
-      setBiofertilizerData(biofertilizers);
-
-      console.log('✅ [REPORTS] Datos cargados exitosamente:', {
-        ranking: sortedRanking.length,
-        biofertilizantes: biofertilizers.length
-      });
-      
     } catch (error) {
-      console.log('❌ [REPORTS] Error crítico:', error);
-      
-      // Manejar diferentes tipos de error
-      if (error.message.includes('401') || error.message.includes('Token')) {
-        Alert.alert(
-          'Sesión expirada', 
-          'Por favor, vuelve a iniciar sesión',
-          [{ text: 'OK', onPress: () => router.push('/login') }]
-        );
-      } else if (error.message.includes('Network') || error.message.includes('Timeout')) {
-        Alert.alert('Error de conexión', 'Verifica tu conexión a internet e intenta nuevamente.');
-      } else {
-        // Para otros errores, mostrar datos vacíos sin alerta
-        console.log('⚠️ [REPORTS] Error no crítico, mostrando datos vacíos');
-      }
-      
+      handleLoadError(error);
       setRankingData([]);
       setBiofertilizerData([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [user]);
 
-  const onRefresh = async () => {
+  // Procesar datos de agricultores
+  const processFarmersData = useCallback(async (farmers, userId) => {
+    const rankingPromises = farmers.map(async (farmer) => {
+      try {
+        const crops = await scientistService.getFarmerCrops(userId, farmer._id || farmer.id);
+        return {
+          id: farmer._id || farmer.id,
+          nombre: farmer.name || farmer.nombre,
+          email: farmer.email,
+          ubicacion: farmer.ubicacion,
+          totalProyectos: crops?.length || 0,
+          cultivos: crops || []
+        };
+      } catch (error) {
+        return {
+          id: farmer._id || farmer.id,
+          nombre: farmer.name || farmer.nombre,
+          totalProyectos: 0,
+          cultivos: []
+        };
+      }
+    });
+
+    return await Promise.all(rankingPromises);
+  }, []);
+
+  // Cargar datos de biofertilizantes
+  const loadBiofertilizerData = useCallback(async (rankingResults) => {
+    try {
+      const biofertilizers = await scientistService.getBiofertilizerStats(user.id);
+      setBiofertilizerData(biofertilizers);
+    } catch (e) {
+      // Método alternativo desde cultivos
+      const allCrops = rankingResults.flatMap(farmer => farmer.cultivos);
+      const biofertilizerStats = {};
+      
+      allCrops.forEach(crop => {
+        const biofertilizer = crop.biofertilizante || crop.fertilizer || 'No especificado';
+        biofertilizerStats[biofertilizer] = (biofertilizerStats[biofertilizer] || 0) + 1;
+      });
+
+      const biofertilizers = Object.entries(biofertilizerStats).map(([name, count]) => ({
+        biofertilizante: name,
+        totalProyectos: count
+      }));
+
+      setBiofertilizerData(biofertilizers);
+    }
+  }, [user.id]);
+
+  // Manejar errores de carga
+  const handleLoadError = useCallback((error) => {
+    if (error.message.includes('401') || error.message.includes('Token')) {
+      Alert.alert(
+        'Sesión expirada', 
+        'Por favor, vuelve a iniciar sesión',
+        [{ text: 'OK', onPress: () => router.push('/login') }]
+      );
+    } else if (error.message.includes('Network') || error.message.includes('Timeout')) {
+      Alert.alert('Error de conexión', 'Verifica tu conexión a internet e intenta nuevamente.');
+    }
+  }, []);
+
+  useEffect(() => {
+    loadGlobalStats();
+  }, [loadGlobalStats]);
+
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadGlobalStats();
-  };
+  }, [loadGlobalStats]);
+
+
+
+  const HeaderSection = useMemo(() => (
+    <View style={styles.header}>
+      <Text style={styles.title}>📊 Reportes y Estadísticas</Text>
+      <Text style={styles.subtitle}>
+        Análisis global de datos agrícolas
+      </Text>
+    </View>
+  ), []);
+
+const StatsSection = useMemo(() => (
+  <View style={styles.statsSection}>
+    <Text style={styles.sectionTitle}>📈 Resumen General</Text>
+    
+    <View style={styles.statsGrid}>
+      <StatCard 
+        title="Agricultores Analizados"
+        value={rankingData.length}
+        icon="👥"
+      />
+      <StatCard 
+        title="Proyectos Totales"
+        value={rankingData.reduce((sum, item) => sum + (item.totalProyectos || 0), 0)}
+        icon="🌱"
+      />
+    </View>
+  </View>
+), [rankingData]);
+
+  const ChartsSection = useMemo(() => (
+    <View style={styles.chartsSection}>
+      <Text style={styles.sectionTitle}>📊 Gráficas de Análisis</Text>
+      
+      <FarmersRankingChart 
+        data={rankingData}
+        title="🏆 Ranking de Agricultores"
+      />
+
+      <BiofertilizerChart 
+        data={biofertilizerData}
+        title="🧪 Uso de Biofertilizantes"
+      />
+    </View>
+  ), [rankingData, biofertilizerData]);
+
+  const HelpSection = useMemo(() => (
+    <View style={styles.helpSection}>
+      <View style={styles.helpCard}>
+        <Text style={styles.helpTitle}>💡 Información del Reporte</Text>
+        <View style={styles.helpList}>
+          <HelpItem text={`Agricultores analizados: ${rankingData.length}`} />
+          <HelpItem text={`Proyectos en ranking: ${rankingData.reduce((sum, item) => sum + (item.totalProyectos || 0), 0)}`} />
+          <HelpItem text={`Biofertilizantes registrados: ${biofertilizerData.length}`} />
+          <HelpItem text={`Fecha de generación: ${new Date().toLocaleDateString('es-MX')}`} />
+        </View>
+      </View>
+    </View>
+  ), [rankingData, biofertilizerData]);
 
   if (loading && !refreshing) {
     return (
@@ -403,98 +495,25 @@ export default function Reports() {
       }
       showsVerticalScrollIndicator={true}
     >
-      {/* 🔹 Header - Mismo estilo que Home Scientist */}
-      <View style={styles.header}>
-        <Text style={styles.title}>📊 Reportes y Estadísticas</Text>
-        <Text style={styles.subtitle}>
-          Análisis global de datos agrícolas
-        </Text>
-      </View>
+      {HeaderSection}
 
-      {/* 🔹 Información de conexión - Mismo estilo que Home Scientist */}
-      <View style={styles.connectionInfo}>
-        <View style={styles.connectionStatus}>
-          <View style={[styles.statusDot, isConnected ? styles.statusOnline : styles.statusOffline]} />
-          <Text style={styles.statusText}>
-            {isConnected ? 'Conectado' : 'Sin conexión'}
-          </Text>
-        </View>
-        
-        {unsyncedCount > 0 && (
-          <Text style={styles.unsyncedText}>
-            📱 {unsyncedCount} pendientes
-          </Text>
-        )}
-      </View>
+      {StatsSection}
+      {ChartsSection}
+      {HelpSection}
 
-      {/* 🔹 Estadísticas rápidas - Mismo estilo que Home Scientist */}
-      <View style={styles.statsSection}>
-        <Text style={styles.sectionTitle}>📈 Resumen General</Text>
-        
-        <View style={styles.statsGrid}>
-          <StatCard 
-            title="Agricultores Analizados"
-            value={rankingData.length}
-          />
-          <StatCard 
-            title="Biofertilizantes"
-            value={biofertilizerData.length}
-          />
-          <StatCard 
-            title="Proyectos Totales"
-            value={rankingData.reduce((sum, item) => sum + (item.totalProyectos || 0), 0)}
-          />
-        </View>
-      </View>
-
-      {/* 🔹 Gráficas de Reportes */}
-      <View style={styles.chartsSection}>
-        <Text style={styles.sectionTitle}>📊 Gráficas de Análisis</Text>
-        
-        {/* 📊 GRÁFICA: Ranking de Agricultores */}
-        <FarmersRankingChart 
-          data={rankingData}
-          title="🏆 Ranking de Agricultores"
-        />
-
-        {/* 📊 GRÁFICA: Comparativa de Biofertilizantes */}
-        <BiofertilizerChart 
-          data={biofertilizerData}
-          title="🧪 Uso de Biofertilizantes"
-        />
-      </View>
-
-      {/* 🔹 Información adicional - Mismo estilo que Home Scientist */}
-      <View style={styles.helpSection}>
-        <View style={styles.helpCard}>
-          <Text style={styles.helpTitle}>💡 Información del Reporte</Text>
-          <View style={styles.helpList}>
-            <View style={styles.helpItem}>
-              <Text style={styles.helpIcon}>•</Text>
-              <Text style={styles.helpText}>Agricultores analizados: {rankingData.length}</Text>
-            </View>
-            <View style={styles.helpItem}>
-              <Text style={styles.helpIcon}>•</Text>
-              <Text style={styles.helpText}>Proyectos en ranking: {rankingData.reduce((sum, item) => sum + (item.totalProyectos || 0), 0)}</Text>
-            </View>
-            <View style={styles.helpItem}>
-              <Text style={styles.helpIcon}>•</Text>
-              <Text style={styles.helpText}>Biofertilizantes registrados: {biofertilizerData.length}</Text>
-            </View>
-            <View style={styles.helpItem}>
-              <Text style={styles.helpIcon}>•</Text>
-              <Text style={styles.helpText}>Fecha de generación: {new Date().toLocaleDateString('es-MX')}</Text>
-            </View>
-          </View>
-        </View>
-      </View>
-
-      {/* 🔽 ESPACIO EN BLANCO PARA SCROLL ADICIONAL */}
       <View style={styles.bottomSpacing} />
     </ScrollView>
   );
 }
 
+const HelpItem = React.memo(({ text }) => (
+  <View style={styles.helpItem}>
+    <Text style={styles.helpIcon}>•</Text>
+    <Text style={styles.helpText}>{text}</Text>
+  </View>
+));
+
+// Estilos
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -515,9 +534,8 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 10,
   },
-  // 🔹 HEADER - Mismo estilo que Home Scientist
   header: {
-    backgroundColor: '#7b1fa2', // Color morado para científico
+    backgroundColor: '#7b1fa2',
     padding: 20,
     borderRadius: 12,
     marginBottom: 16,
@@ -535,7 +553,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     opacity: 0.9,
   },
-  // 🔹 INFORMACIÓN DE CONEXIÓN - Mismo estilo que Home Scientist
   connectionInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -571,74 +588,6 @@ const styles = StyleSheet.create({
     color: '#ff9800',
     fontWeight: '500',
   },
-  // 🔹 TARJETAS PRINCIPALES - Mismo estilo que Home Scientist
-  mainCard: {
-    backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-  },
-  cardTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    flex: 1,
-    marginRight: 8,
-  },
-  cardIcon: {
-    fontSize: 24,
-    marginRight: 12,
-    marginTop: 2,
-  },
-  cardTitleText: {
-    flex: 1,
-  },
-  cardName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 2,
-  },
-  cardSubtitle: {
-    fontSize: 14,
-    color: '#666',
-  },
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    minWidth: 80,
-    alignItems: 'center',
-  },
-  cardDetails: {
-    marginBottom: 16,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  detailLabel: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-  },
-  detailValue: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '600',
-  },
-  // 🔹 SECCIONES
   statsSection: {
     marginBottom: 16,
   },
@@ -651,13 +600,12 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 12,
   },
-  // 🔹 ESTADÍSTICAS - Mismo estilo que Home Scientist
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    rowGap: 16, // 🔹 Espacio vertical entre filas
-    columnGap: 12, // 🔹 Espacio horizontal entre columnas
+    rowGap: 16,
+    columnGap: 12,
   },
   statCard: {
     flex: 1,
@@ -670,10 +618,9 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
     minHeight: 100,
-    marginHorizontal: 6, // 🔹 Espacio lateral
-    marginVertical: 6,   // 🔹 Espacio entre tarjetas verticalmente
+    marginHorizontal: 6,
+    marginVertical: 6,
   },
-
   statContent: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -699,7 +646,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     lineHeight: 14,
   },
-  // 🔹 GRÁFICAS
   chartContainer: {
     backgroundColor: 'white',
     borderRadius: 12,
@@ -755,7 +701,6 @@ const styles = StyleSheet.create({
     color: '#adb5bd',
     textAlign: 'center',
   },
-  // Estilos para el ranking
   rankingLegend: {
     marginTop: 15,
     padding: 12,
@@ -794,7 +739,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#28a745',
   },
-  // Estilos para biofertilizantes
   biofertilizerStats: {
     marginTop: 15,
     padding: 12,
@@ -815,7 +759,58 @@ const styles = StyleSheet.create({
   statItem: {
     alignItems: 'center',
   },
-  // 🔹 SECCIÓN DE AYUDA
+  // 🔥 NUEVOS ESTILOS PARA AGRUPACIÓN DE BIOFERTILIZANTES
+  groupingInfo: {
+    marginTop: 8,
+    padding: 8,
+    backgroundColor: '#e3f2fd',
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  groupingText: {
+    fontSize: 11,
+    color: '#1976d2',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  biofertilizerList: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  listTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#495057',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  biofertilizerItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  biofertilizerName: {
+    fontSize: 11,
+    color: '#495057',
+    flex: 1,
+  },
+  biofertilizerCount: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#28a745',
+    marginLeft: 8,
+  },
+  moreText: {
+    fontSize: 10,
+    color: '#6c757d',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 4,
+  },
   helpSection: {
     marginBottom: 16,
   },
@@ -853,7 +848,6 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 20,
   },
-  // 🔹 ESPACIO AL FINAL
   bottomSpacing: {
     height: 40,
   },

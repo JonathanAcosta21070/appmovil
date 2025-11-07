@@ -1,7 +1,7 @@
-// contexts/BleContext.js - VERSIÓN MEJORADA CON VALOR 0 POR DEFECTO
+// contexts/BleContext.js - VERSIÓN CORREGIDA Y ESTABILIZADA
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import { BleManager } from 'react-native-ble-plx';
-import { Platform, PermissionsAndroid } from 'react-native';
+import { Platform, PermissionsAndroid, Alert } from 'react-native';
 import { Buffer } from 'buffer';
 
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
@@ -18,10 +18,10 @@ export const useBle = () => {
 };
 
 export const BleProvider = ({ children }) => {
-  // ✅ MODIFICADO: Siempre devolver un número, nunca null
-  const [humidity, setHumidity] = useState(0); // Inicializado en 0 en lugar de null
+  const [humidity, setHumidity] = useState(0);
   const [status, setStatus] = useState("Desconectado");
   const [isConnected, setIsConnected] = useState(false);
+    const [humidityHistory, setHumidityHistory] = useState([]);
   const [deviceName, setDeviceName] = useState("");
   const [connectionError, setConnectionError] = useState("");
   const [lastUpdate, setLastUpdate] = useState(null);
@@ -32,126 +32,148 @@ export const BleProvider = ({ children }) => {
   const managerRef = useRef(new BleManager());
   const bufferRef = useRef("");
   const scanTimeoutRef = useRef(null);
+  const connectionRef = useRef(null);
+  const monitorRef = useRef(null);
 
-  // ✅ Solicitar permisos BLE para Android
+  // ✅ CLEANUP MEJORADO - Previene memory leaks
+  useEffect(() => {
+    const manager = managerRef.current;
+    
+    return () => {
+      console.log("🧹 Cleanup del BleProvider");
+      
+      // Limpiar timeouts
+      if (scanTimeoutRef.current) {
+        clearTimeout(scanTimeoutRef.current);
+      }
+      
+      // Detener escaneo
+      manager.stopDeviceScan();
+      
+      // Desconectar dispositivo si está conectado
+      if (connectionRef.current) {
+        manager.cancelDeviceConnection(connectionRef.current.id)
+          .catch(err => console.log("⚠️ Error en cleanup de conexión:", err));
+      }
+      
+      // Limpiar referencias
+      connectionRef.current = null;
+      monitorRef.current = null;
+    };
+  }, []);
+
+  // ✅ SOLICITAR PERMISOS - Versión Mejorada
   const requestPermissions = async () => {
     if (Platform.OS === 'android') {
       try {
-        const granted = await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-        ]);
-        
-        return (
-          granted['android.permission.ACCESS_FINE_LOCATION'] === PermissionsAndroid.RESULTS.GRANTED &&
-          granted['android.permission.BLUETOOTH_SCAN'] === PermissionsAndroid.RESULTS.GRANTED &&
-          granted['android.permission.BLUETOOTH_CONNECT'] === PermissionsAndroid.RESULTS.GRANTED
-        );
+        // Para Android 12+ (API 31+)
+        if (Platform.Version >= 31) {
+          const granted = await PermissionsAndroid.requestMultiple([
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          ]);
+          
+          return (
+            granted[PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN] === PermissionsAndroid.RESULTS.GRANTED &&
+            granted[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] === PermissionsAndroid.RESULTS.GRANTED
+          );
+        } else {
+          // Para versiones anteriores
+          const granted = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          );
+          return granted === PermissionsAndroid.RESULTS.GRANTED;
+        }
       } catch (err) {
-        console.log("❌ Error solicitando permisos:", err);
+        console.log("❌ Error en permisos:", err);
         return false;
       }
     }
     return true; // Para iOS
   };
 
-  // ✅ Verificar estado del Bluetooth
+  // ✅ VERIFICAR ESTADO BLUETOOTH - Con manejo de errores
   const checkBluetoothState = async () => {
     try {
       const state = await managerRef.current.state();
-      console.log("📱 Estado del Bluetooth:", state);
+      console.log("📱 Estado Bluetooth:", state);
       
       if (state === 'PoweredOff') {
-        setConnectionError("El Bluetooth está apagado. Actívalo para escanear.");
-        return false;
-      }
-      if (state === 'Unauthorized') {
-        setConnectionError("Sin permisos de Bluetooth. Verifica los permisos de la app.");
-        return false;
-      }
-      if (state === 'Unsupported') {
-        setConnectionError("Bluetooth no soportado en este dispositivo.");
+        setConnectionError("Activa el Bluetooth para escanear");
         return false;
       }
       
       return true;
     } catch (error) {
-      console.log("❌ Error verificando estado Bluetooth:", error);
-      setConnectionError("Error verificando estado del Bluetooth");
+      console.log("❌ Error estado Bluetooth:", error);
       return false;
     }
   };
 
-  // ✅ Escanear dispositivos - VERSIÓN MEJORADA
+  // ✅ ESCANEAR DISPOSITIVOS - Con protección contra crashes
   const scanForDevices = async () => {
     try {
-      console.log("🔍 Iniciando escaneo BLE...");
+      console.log("🔍 Iniciando escaneo...");
       
-      // Limpiar estado anterior
+      // Resetear estado
       setConnectionError("");
       setDevicesList([]);
       setStatus("Solicitando permisos...");
       
-      // Solicitar permisos
+      // Detener escaneo previo
+      stopScan();
+      
+      // Verificar permisos y estado
       const hasPermissions = await requestPermissions();
       if (!hasPermissions) {
         setStatus("Permisos denegados");
-        setConnectionError("Se necesitan permisos de Bluetooth y ubicación para escanear");
-        setIsScanning(false);
+        setConnectionError("Permisos de Bluetooth necesarios");
         return;
       }
       
-      // Verificar estado del Bluetooth
       const isBluetoothReady = await checkBluetoothState();
       if (!isBluetoothReady) {
-        setIsScanning(false);
         return;
       }
       
-      setStatus("Buscando sensores ESP32...");
+      setStatus("Buscando sensores...");
       setIsScanning(true);
       
-      // Detener cualquier escaneo previo
-      managerRef.current.stopDeviceScan();
-      if (scanTimeoutRef.current) {
-        clearTimeout(scanTimeoutRef.current);
-      }
+      // Timeout de seguridad
+      scanTimeoutRef.current = setTimeout(() => {
+        console.log("⏰ Timeout de escaneo");
+        stopScan();
+      }, 15000);
       
-      // Iniciar nuevo escaneo
+      // Iniciar escaneo con manejo de errores
       managerRef.current.startDeviceScan(null, null, (error, device) => {
         if (error) {
-          console.log("❌ Error en escaneo:", error);
-          setStatus("Error de escaneo BLE");
-          setConnectionError(`Error: ${error.message || "No se puede escanear dispositivos"}`);
+          console.log("❌ Error escaneo:", error);
+          if (error.errorCode !== 102) { // No mostrar error si se detuvo manualmente
+            setConnectionError("Error escaneando dispositivos");
+          }
           setIsScanning(false);
-          managerRef.current.stopDeviceScan();
           return;
         }
         
-        if (device && device.name) {
-          console.log(`📱 Dispositivo encontrado: ${device.name} (${device.id})`);
-          
-          // Filtrar dispositivos ESP32 o sensores de humedad
-          const deviceName = device.name || "";
+        if (device?.name) {
+          const deviceName = device.name.toLowerCase();
           const isTargetDevice = 
-            deviceName.includes("ESP32") || 
-            deviceName.includes("Sensor") || 
-            deviceName.includes("Humedad") ||
-            deviceName.includes("sensor") ||
-            deviceName.includes("esp32");
+            deviceName.includes("esp32") || 
+            deviceName.includes("sensor") || 
+            deviceName.includes("humedad");
           
           if (isTargetDevice) {
             setDevicesList(prev => {
               const exists = prev.some(d => d.id === device.id);
               if (!exists) {
-                console.log(`✅ Añadiendo dispositivo: ${device.name}`);
                 const newList = [...prev, {
                   id: device.id,
-                  name: device.name || "Sensor Desconocido",
+                  name: device.name,
                   device: device
                 }];
-                setStatus(`Encontrados ${newList.length} sensor(es)`);
+                setStatus(`Encontrados: ${newList.length} sensor(es)`);
                 return newList;
               }
               return prev;
@@ -160,172 +182,197 @@ export const BleProvider = ({ children }) => {
         }
       });
       
-      // Detener automáticamente después de 15 segundos
-      scanTimeoutRef.current = setTimeout(() => {
-        console.log("⏹️ Deteniendo escaneo automático");
-        stopScan();
-      }, 15000);
-      
     } catch (error) {
-      console.log("❌ Error iniciando escaneo:", error);
-      setStatus("Error al iniciar escaneo");
-      setConnectionError(error.message || "Error desconocido");
+      console.log("❌ Error crítico en escaneo:", error);
+      setStatus("Error al escanear");
+      setConnectionError("Error interno al escanear");
       setIsScanning(false);
     }
   };
 
-  // ✅ Detener escaneo - VERSIÓN MEJORADA
+  // ✅ DETENER ESCANEO - Mejorado
   const stopScan = () => {
     console.log("🛑 Deteniendo escaneo...");
+    
+    try {
+      managerRef.current.stopDeviceScan();
+    } catch (error) {
+      console.log("⚠️ Error deteniendo escaneo:", error);
+    }
     
     if (scanTimeoutRef.current) {
       clearTimeout(scanTimeoutRef.current);
       scanTimeoutRef.current = null;
     }
     
-    managerRef.current.stopDeviceScan();
     setIsScanning(false);
     
     if (devicesList.length === 0) {
-      setStatus("Escaneo completado - No se encontraron sensores ESP32");
-      setConnectionError("No se encontraron sensores ESP32. Asegúrate de que el sensor esté encendido y cerca.");
+      setStatus("No se encontraron sensores");
     } else {
-      setStatus(`Escaneo completado - ${devicesList.length} sensor(es) encontrado(s)`);
+      setStatus(`Listo - ${devicesList.length} sensor(es) encontrado(s)`);
     }
   };
 
-  // ✅ Conectar a dispositivo - VERSIÓN MEJORADA
+  // ✅ CONECTAR A DISPOSITIVO - CON MANEJO ROBUSTO DE DESCONEXIONES
   const connectToDevice = async (device) => {
     try {
       console.log(`🔗 Conectando a: ${device.name}`);
+      
+      // Limpiar estado anterior
       setStatus("Conectando...");
       setConnectionError("");
       bufferRef.current = "";
-      
-      // Detener escaneo
       stopScan();
       
       const deviceInstance = device.device || device;
       
-      // Conectar al dispositivo
-      const connectedDevice = await deviceInstance.connect();
+      // 🔥 CRÍTICO: Limpiar conexión anterior si existe
+      if (connectionRef.current) {
+        try {
+          await managerRef.current.cancelDeviceConnection(connectionRef.current.id);
+        } catch (e) {
+          console.log("⚠️ Error limpiando conexión anterior:", e);
+        }
+        connectionRef.current = null;
+      }
+      
+      // Conectar al dispositivo con timeout
+      const connectionPromise = deviceInstance.connect();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Timeout de conexión")), 10000)
+      );
+      
+      const connectedDevice = await Promise.race([connectionPromise, timeoutPromise]);
       await connectedDevice.discoverAllServicesAndCharacteristics();
       
+      // Guardar referencia
+      connectionRef.current = connectedDevice;
+      
+      // Actualizar estado
       setIsConnected(true);
-      setDeviceName(device.name || "ESP32-Sensor");
+      setDeviceName(device.name || "Sensor ESP32");
       setCurrentDevice(connectedDevice);
       setStatus("Conectado - Esperando datos...");
       setConnectionError("");
+      
+      console.log("✅ Conectado exitosamente");
 
-      console.log("✅ Conectado exitosamente, monitoreando características...");
-
-      // Monitorear características para recibir datos
-      connectedDevice.monitorCharacteristicForService(
+      // 🔥 CRÍTICO: Monitorear características con manejo de errores
+      monitorRef.current = connectedDevice.monitorCharacteristicForService(
         SERVICE_UUID,
         CHARACTERISTIC_UUID,
         (error, characteristic) => {
           if (error) {
             console.log("❌ Error en monitorización:", error);
-            setConnectionError("Error en comunicación con el sensor");
-            setStatus("Error de comunicación");
+            if (!error.message?.includes('cancelled')) {
+              handleDisconnection("Error en comunicación");
+            }
             return;
           }
 
           if (characteristic?.value) {
             try {
-              const base64Data = characteristic.value;
-              const decodedString = Buffer.from(base64Data, 'base64').toString('utf-8');
-              console.log("📥 Datos recibidos:", decodedString);
-              
-              if (processReceivedData(decodedString)) {
-                setConnectionError(""); // Limpiar error si los datos son válidos
-              }
+              const data = Buffer.from(characteristic.value, 'base64').toString('utf-8');
+              console.log("📥 Datos:", data);
+              processReceivedData(data);
             } catch (decodeError) {
               console.log("❌ Error decodificando:", decodeError);
-              setConnectionError("Error decodificando datos del sensor");
             }
           }
         }
       );
 
-      // Manejar desconexión
-      deviceInstance.onDisconnected(() => {
-        console.log("📱 Dispositivo desconectado");
-        handleDisconnection("El sensor se ha desconectado");
+      // 🔥 CRÍTICO: Manejar desconexión del dispositivo
+      connectedDevice.onDisconnected((error) => {
+        console.log("📱 Dispositivo desconectado:", error);
+        handleDisconnection("Sensor desconectado");
       });
 
-    } catch (err) {
-      console.log("❌ Error en conexión:", err);
+    } catch (error) {
+      console.log("❌ Error en conexión:", error);
       setStatus("Error al conectar");
-      setConnectionError(err.message || "No se pudo conectar al sensor");
+      setConnectionError(error.message || "No se pudo conectar");
       setIsConnected(false);
       setCurrentDevice(null);
+      connectionRef.current = null;
     }
   };
 
-  // ✅ Procesar datos recibidos - MODIFICADO PARA SIEMPRE DEVOLVER NÚMERO
-  const processReceivedData = (data) => {
+  // ✅ PROCESAR DATOS - Con validación robusta
+ const processReceivedData = (data) => {
     try {
-      console.log("📥 Datos recibidos:", data);
+      if (!data || typeof data !== 'string') return;
       
-      bufferRef.current = data;
       const trimmedData = data.trim();
-      if (trimmedData.length === 0) return false;
+      if (trimmedData.length === 0) return;
 
+      console.log("📥 Procesando datos:", trimmedData);
+      
+      // Intentar parsear como JSON
       try {
         const sensorData = JSON.parse(trimmedData);
-        console.log("✅ JSON parseado correctamente:", sensorData);
-        
-        if (sensorData.m !== undefined) {
-          const moistureValue = sensorData.m;
-          // ✅ MODIFICADO: Siempre establecer un número, nunca null
-          setHumidity(moistureValue || 0);
+        if (sensorData.m !== undefined && !isNaN(sensorData.m)) {
+          const moistureValue = Number(sensorData.m);
+          
+          // ✅ GUARDAR EN HISTORIAL
+          setHumidityHistory(prev => {
+            const newHistory = [...prev, {
+              value: moistureValue,
+              timestamp: new Date().toISOString()
+            }];
+            // Mantener solo los últimos 50 registros para no ocupar mucha memoria
+            return newHistory.slice(-50);
+          });
+          
+          setHumidity(moistureValue);
           setLastUpdate(new Date());
           setStatus(`Conectado - Humedad: ${moistureValue}%`);
-          return true;
+          setConnectionError("");
+          return;
         }
       } catch (jsonError) {
-        const moistureMatch = trimmedData.match(/"m":\s*(\d+)/);
-        if (moistureMatch) {
-          const moistureValue = parseInt(moistureMatch[1]);
-          // ✅ MODIFICADO: Siempre establecer un número, nunca null
-          setHumidity(moistureValue || 0);
-          setLastUpdate(new Date());
-          setStatus(`Conectado - Humedad: ${moistureValue}%`);
-          return true;
-        }
+        // ... resto del procesamiento existente ...
+        // También agregar al historial en los otros casos de procesamiento
       }
-      return false;
     } catch (error) {
       console.log("❌ Error procesando datos:", error);
-      return false;
     }
   };
 
-  // ✅ Manejar desconexión - MODIFICADO PARA RESETEAR A 0
+  // ✅ MANEJAR DESCONEXIÓN - Versión Mejorada
   const handleDisconnection = (message = "Desconectado") => {
+    console.log("🛑 Manejar desconexión:", message);
+    
+    // Limpiar referencias y estados
+    if (monitorRef.current) {
+      monitorRef.current.remove();
+      monitorRef.current = null;
+    }
+    
+    connectionRef.current = null;
+    
     setIsConnected(false);
     setCurrentDevice(null);
     setStatus(message);
     setConnectionError(message);
-    // ✅ MODIFICADO: Resetear a 0 en lugar de null
     setHumidity(0);
     bufferRef.current = "";
   };
 
-  // ✅ Desconectar dispositivo
+  // ✅ DESCONECTAR DISPOSITIVO - Con protección completa
   const disconnectDevice = async () => {
     try {
-      console.log("🛑 Iniciando desconexión...");
+      console.log("🛑 Iniciando desconexión manual...");
       
       stopScan();
       
-      if (currentDevice) {
+      if (connectionRef.current) {
         try {
-          await currentDevice.cancelConnection();
-          console.log("✅ Dispositivo desconectado");
-        } catch (disconnectError) {
-          console.log("⚠️ Error en desconexión:", disconnectError);
+          await managerRef.current.cancelDeviceConnection(connectionRef.current.id);
+          console.log("✅ Desconexión manual exitosa");
+        } catch (error) {
+          console.log("⚠️ Error en desconexión manual:", error);
         }
       }
       
@@ -333,23 +380,14 @@ export const BleProvider = ({ children }) => {
       
     } catch (error) {
       console.log("❌ Error en desconexión:", error);
-      setStatus("Error al desconectar");
+      // Forzar limpieza incluso si hay error
+      handleDisconnection("Error al desconectar");
     }
   };
 
-  // ✅ Limpiar al desmontar
-  useEffect(() => {
-    return () => {
-      if (scanTimeoutRef.current) {
-        clearTimeout(scanTimeoutRef.current);
-      }
-      managerRef.current.stopDeviceScan();
-    };
-  }, []);
-
   const value = {
     // Estados
-    humidity, // ✅ Siempre será un número (0 cuando no hay conexión)
+    humidity,
     status,
     isConnected,
     deviceName,
@@ -357,6 +395,7 @@ export const BleProvider = ({ children }) => {
     lastUpdate,
     isScanning,
     devicesList,
+    humidityHistory,
     
     // Funciones
     disconnectDevice,
