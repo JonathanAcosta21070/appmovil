@@ -1,4 +1,4 @@
-// app/scientist/home-scientist.js - CON BOTÓN DE CERRAR SESIÓN EN ESTADO DEL SISTEMA
+// app/scientist/home-scientist.js - VERSIÓN FINAL CON CACHE OFFLINE COMPLETO
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, RefreshControl } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
@@ -6,79 +6,131 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSync } from '../../contexts/SyncContext';
 import { scientistService } from '../../services/scientistService';
 
-// Constantes para estadísticas por defecto
-const DEFAULT_STATS = {
-  totalCrops: 15,
-  activeProjects: 8,
-  biofertilizers: 12
-};
-
 export default function HomeScientist() {
   const [assignedFarmers, setAssignedFarmers] = useState([]);
   const [recentData, setRecentData] = useState([]);
-  const [stats, setStats] = useState(DEFAULT_STATS);
+  const [stats, setStats] = useState({
+    totalCrops: 0,
+    activeProjects: 0,
+    biofertilizers: 0
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [dataSource, setDataSource] = useState('server'); // 'server' o 'cache'
   
   const { 
     isConnected, 
     isSyncing, 
-    unsyncedCount, 
-    user, 
-    clearUser 
+    user
   } = useSync();
 
-  // Memoizar función de carga de datos
-  const loadData = useCallback(async () => {
+  // Cargar datos con soporte offline MEJORADO
+  const loadData = useCallback(async (forceRefresh = false) => {
     try {
       setIsLoading(true);
       
-      const [farmersData, sensorData] = await Promise.all([
-        scientistService.getFarmers(user.id),
-        scientistService.getRecentSensorData(user.id)
-      ]);
+      let farmersData = [];
+      let dataSourceType = 'server';
       
-      setAssignedFarmers(farmersData || []);
-      setRecentData(sensorData || []);
+      // Usar las nuevas funciones con cache
+      if (isConnected && !forceRefresh) {
+        // Cargar desde servidor con cache automático
+        console.log('🔄 Cargando datos desde servidor con cache...');
+        farmersData = await scientistService.getFarmersWithCache(user.id, forceRefresh);
+        dataSourceType = 'server';
+      } else {
+        // Cargar desde cache
+        console.log('📁 Cargando datos desde cache...');
+        farmersData = await scientistService.getFarmersWithCache(user.id, false);
+        dataSourceType = 'cache';
+        
+        // Si no hay cache pero hay conexión, forzar carga del servidor
+        if (farmersData.length === 0 && isConnected) {
+          console.log('🔄 No hay cache, cargando desde servidor...');
+          farmersData = await scientistService.getFarmersWithCache(user.id, true);
+          dataSourceType = 'server';
+        }
+      }
 
-      // Calcular estadísticas
-      await calculateStats(farmersData);
+      setAssignedFarmers(farmersData || []);
+      setDataSource(dataSourceType);
+      await calculateStats(farmersData, dataSourceType);
+      
+      setLastUpdate(new Date());
+      
+      // Cargar datos adicionales si hay conexión
+      if (isConnected) {
+        try {
+          const sensorData = await scientistService.getRecentSensorData(user.id);
+          setRecentData(sensorData || []);
+        } catch (error) {
+          console.log('❌ Error cargando datos de sensor:', error);
+        }
+      }
 
     } catch (error) {
       console.log('❌ [HOME] Error cargando datos:', error);
-      setStats(DEFAULT_STATS);
-      Alert.alert('Error', 'No se pudieron cargar todos los datos');
+      
+      // Intentar cargar desde cache como fallback
+      try {
+        const cachedData = await scientistService.getAllOfflineData(user.id);
+        setAssignedFarmers(cachedData.farmers);
+        setDataSource('cache');
+        await calculateStats(cachedData.farmers, 'cache');
+      } catch (cacheError) {
+        console.log('❌ Error cargando desde cache:', cacheError);
+        setAssignedFarmers([]);
+      }
+      
+      if (isConnected) {
+        Alert.alert('Error', 'No se pudieron cargar todos los datos');
+      }
     } finally {
       setIsLoading(false);
+      setRefreshing(false);
     }
-  }, [user.id]);
+  }, [user?.id, isConnected]);
 
-  // Función separada para calcular estadísticas
-  const calculateStats = useCallback(async (farmersData) => {
+  // Calcular estadísticas MEJORADO
+  const calculateStats = useCallback(async (farmersData, source) => {
     if (!farmersData || farmersData.length === 0) {
-      setStats(DEFAULT_STATS);
+      setStats({ totalCrops: 0, activeProjects: 0, biofertilizers: 0 });
       return;
     }
 
     let totalCrops = 0;
     let activeProjects = 0;
-    let totalBiofertilizers = 0;
+    let biofertilizers = new Set();
 
-    const cropsPromises = farmersData.map(async (farmer) => {
+    console.log(`📊 Calculando estadísticas desde: ${source}`);
+
+    // Usar Promise.all para cargar cultivos en paralelo
+    const cropPromises = farmersData.map(async (farmer) => {
       try {
-        const crops = await scientistService.getFarmerCrops(user.id, farmer._id || farmer.id);
+        let crops = [];
+        
+        // Usar la función con cache para cultivos
+        crops = await scientistService.getFarmerCropsWithCache(user.id, farmer._id, false);
         
         totalCrops += crops?.length || 0;
         
-        const activeCrops = crops?.filter(crop => 
-          crop.status === 'active' || crop.status === 'en progreso' || !crop.status
+        // Contar proyectos activos
+        const active = crops?.filter(crop => 
+          crop.status === 'active' || crop.status === 'Activo' || !crop.status
         ).length || 0;
-        activeProjects += activeCrops;
+        activeProjects += active;
 
-        // Contar biofertilizantes
+        // Contar biofertilizantes únicos
         crops?.forEach(crop => {
-          if (crop.biofertilizante || crop.fertilizer || crop.biofertilizerType) {
-            totalBiofertilizers += 1;
+          if (crop.biofertilizante) {
+            biofertilizers.add(crop.biofertilizante);
+          }
+          if (crop.fertilizer) {
+            biofertilizers.add(crop.fertilizer);
+          }
+          if (crop.bioFertilizer) {
+            biofertilizers.add(crop.bioFertilizer);
           }
         });
 
@@ -87,34 +139,33 @@ export default function HomeScientist() {
       }
     });
 
-    await Promise.all(cropsPromises);
-
-    // Calcular biofertilizantes finales
-    let finalBiofertilizersCount = totalBiofertilizers;
-    if (finalBiofertilizersCount === 0 && totalCrops > 0) {
-      finalBiofertilizersCount = Math.floor(totalCrops * 0.7);
-    } else if (finalBiofertilizersCount === 0) {
-      finalBiofertilizersCount = DEFAULT_STATS.biofertilizers;
-    }
+    await Promise.all(cropPromises);
 
     setStats({
-      totalCrops: totalCrops || DEFAULT_STATS.totalCrops,
-      activeProjects: activeProjects || DEFAULT_STATS.activeProjects,
-      biofertilizers: finalBiofertilizersCount
+      totalCrops,
+      activeProjects,
+      biofertilizers: biofertilizers.size
     });
-  }, [user.id]);
+    
+    console.log('✅ Estadísticas calculadas:', { totalCrops, activeProjects, biofertilizers: biofertilizers.size });
+  }, [user?.id]);
 
   useFocusEffect(
     React.useCallback(() => {
-      loadData();
-    }, [loadData])
+      if (user?.id) {
+        loadData();
+      }
+    }, [loadData, user?.id])
   );
 
   const onRefresh = useCallback(async () => {
+    if (!isConnected) {
+      Alert.alert('Sin conexión', 'No puedes actualizar los datos sin conexión a internet');
+      return;
+    }
     setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
-  }, [loadData]);
+    await loadData(true); // Forzar refresh
+  }, [loadData, isConnected]);
 
   // Cerrar sesión
   const handleLogout = useCallback(async () => {
@@ -128,6 +179,10 @@ export default function HomeScientist() {
           style: 'destructive',
           onPress: async () => {
             try {
+              // Limpiar cache al cerrar sesión
+              if (user?.id) {
+                await scientistService.clearOldCache(user.id);
+              }
               await AsyncStorage.multiRemove(['user', 'localActions']);
               router.replace('/');
             } catch (error) {
@@ -137,7 +192,7 @@ export default function HomeScientist() {
         },
       ]
     );
-  }, []);
+  }, [user?.id]);
 
   const HeaderSection = useMemo(() => (
     <View style={styles.header}>
@@ -148,23 +203,23 @@ export default function HomeScientist() {
     </View>
   ), [user]);
 
-  // ✅ ACTUALIZADO: MainCard ahora incluye el botón de cerrar sesión
+  // MainCard con información de conexión
   const MainCard = useMemo(() => (
     <View style={styles.mainCard}>
       <View style={styles.cardHeader}>
         <View style={styles.cardTitleContainer}>
-          <Text style={styles.cardIcon}>📊</Text>
+          <Text style={styles.cardIcon}>💾</Text>
           <View style={styles.cardTitleText}>
             <Text style={styles.cardName}>Estado del Sistema</Text>
             <Text style={styles.cardSubtitle}>
-              Información general de la aplicación
+              {isConnected ? 'Sincronizado con servidor' : 'Trabajando con datos locales'}
             </Text>
           </View>
         </View>
         
         <View style={[styles.statusBadge, { backgroundColor: isConnected ? '#4caf50' : '#ff9800' }]}>
           <Text style={styles.statusText}>
-            {isConnected ? '✅ En línea' : '⚠️ Offline'}
+            {isConnected ? '✅ En línea' : '📴 Offline'}
           </Text>
         </View>
       </View>
@@ -183,9 +238,10 @@ export default function HomeScientist() {
             {user?.email || 'No disponible'}
           </Text>
         </View>
+        
       </View>
 
-      {/* ✅ BOTÓN DE CERRAR SESIÓN DENTRO DE LA TARJETA */}
+      {/* Botón de cerrar sesión */}
       <TouchableOpacity 
         style={styles.logoutButton}
         onPress={handleLogout}
@@ -193,7 +249,7 @@ export default function HomeScientist() {
         <Text style={styles.logoutButtonText}>🚪 Cerrar Sesión</Text>
       </TouchableOpacity>
     </View>
-  ), [isConnected, user, handleLogout]);
+  ), [isConnected, user, dataSource, assignedFarmers.length, handleLogout]);
 
   const StatsSection = useMemo(() => (
     <View style={styles.statsSection}>
@@ -202,8 +258,8 @@ export default function HomeScientist() {
       <View style={styles.statsGrid}>
         <StatCard 
           icon="👥"
-          number={assignedFarmers.length || 5}
-          label="Agricultores Asignados"
+          number={assignedFarmers.length}
+          label="Agricultores"
         />
         <StatCard 
           icon="🌱"
@@ -213,42 +269,54 @@ export default function HomeScientist() {
         <StatCard 
           icon="🧪"
           number={stats.biofertilizers}
-          label="Fertilizantes utilizados"
+          label="Biofertilizantes"
         />
       </View>
+      
+      {!isConnected && (
+        <Text style={styles.cacheNotice}>
+          📊 Datos en cache - Actualizado: {lastUpdate ? lastUpdate.toLocaleTimeString('es-MX') : 'Nunca'}
+        </Text>
+      )}
     </View>
-  ), [assignedFarmers.length, stats]);
+  ), [assignedFarmers.length, stats, isConnected, lastUpdate]);
 
   return (
     <ScrollView 
       style={styles.container}
       contentContainerStyle={styles.contentContainer}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        <RefreshControl 
+          refreshing={refreshing} 
+          onRefresh={onRefresh}
+          colors={['#7b1fa2']}
+          tintColor="#7b1fa2"
+          enabled={isConnected} // Solo permitir refresh si hay conexión
+        />
       }
       showsVerticalScrollIndicator={true}
     >
       {HeaderSection}
+
       {MainCard}
       {StatsSection}
 
       {/* Agricultores asignados */}
-      <FarmersSection farmers={assignedFarmers} isLoading={isLoading} />
+      <FarmersSection farmers={assignedFarmers} isLoading={isLoading} dataSource={dataSource} />
 
       {/* Menú principal */}
-      <MenuSection />
+      <MenuSection isConnected={isConnected} />
 
       {/* Ayuda */}
-      <HelpSection />
-
-      {/* ❌ ELIMINADO: Botón de cerrar sesión fuera de la tarjeta */}
+      <HelpSection isConnected={isConnected} dataSource={dataSource} />
 
       <View style={styles.bottomSpacing} />
     </ScrollView>
   );
 }
 
-// Componentes memoizados (se mantienen igual)
+// Componentes memoizados ACTUALIZADOS
+
 const StatCard = React.memo(({ icon, number, label }) => (
   <View style={styles.statCard}>
     <View style={styles.statContent}>
@@ -261,9 +329,11 @@ const StatCard = React.memo(({ icon, number, label }) => (
   </View>
 ));
 
-const FarmersSection = React.memo(({ farmers, isLoading }) => (
+const FarmersSection = React.memo(({ farmers, isLoading, dataSource }) => (
   <View style={styles.farmersSection}>
-    <Text style={styles.sectionTitle}>👥 Agricultores Asignados</Text>
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionTitle}>👥 Agricultores Asignados</Text>
+    </View>
     
     {isLoading ? (
       <LoadingCard text="Cargando agricultores..." />
@@ -299,7 +369,7 @@ const FarmerCard = React.memo(({ farmer }) => (
   </TouchableOpacity>
 ));
 
-const MenuSection = React.memo(() => (
+const MenuSection = React.memo(({ isConnected }) => (
   <View style={styles.menuSection}>
     <Text style={styles.sectionTitle}>🚀 Acciones del Científico</Text>
     
@@ -308,6 +378,7 @@ const MenuSection = React.memo(() => (
       title="Reportes y Gráficas"
       subtitle="Estadísticas por cultivo"
       route="/scientist/reports"
+      enabled={true}
     />
     
     <MenuCard 
@@ -315,37 +386,49 @@ const MenuSection = React.memo(() => (
       title="Generar Recomendaciones"
       subtitle="Asesorar a agricultores"
       route="/scientist/recommendations"
+      enabled={isConnected}
     />
   </View>
 ));
 
-const MenuCard = React.memo(({ icon, title, subtitle, route }) => (
+const MenuCard = React.memo(({ icon, title, subtitle, route, enabled = true }) => (
   <TouchableOpacity 
-    style={styles.menuCard}
-    onPress={() => router.push(route)}
+    style={[styles.menuCard, !enabled && styles.disabledCard]}
+    onPress={() => enabled && router.push(route)}
+    disabled={!enabled}
   >
     <View style={styles.cardHeader}>
       <View style={styles.cardTitleContainer}>
-        <Text style={styles.cardIcon}>{icon}</Text>
+        <Text style={[styles.cardIcon, !enabled && styles.disabledIcon]}>{icon}</Text>
         <View style={styles.cardTitleText}>
-          <Text style={styles.cardName}>{title}</Text>
-          <Text style={styles.cardSubtitle}>{subtitle}</Text>
+          <Text style={[styles.cardName, !enabled && styles.disabledText]}>{title}</Text>
+          <Text style={[styles.cardSubtitle, !enabled && styles.disabledText]}>
+            {!enabled ? 'Requiere conexión a internet' : subtitle}
+          </Text>
         </View>
       </View>
-      <Text style={styles.menuArrow}>›</Text>
+      <Text style={[styles.menuArrow, !enabled && styles.disabledText]}>›</Text>
     </View>
   </TouchableOpacity>
 ));
 
-const HelpSection = React.memo(() => (
+const HelpSection = React.memo(({ isConnected, dataSource }) => (
   <View style={styles.helpSection}>
     <View style={styles.helpCard}>
       <Text style={styles.helpTitle}>💡 Información para Científicos</Text>
       <View style={styles.helpList}>
-        <HelpItem text="Monitorea el progreso de los agricultores asignados" />
-        <HelpItem text="Genera recomendaciones basadas en datos científicos" />
-        <HelpItem text="Analiza datos de sensores para optimizar cultivos" />
-        <HelpItem text="Crea reportes detallados de rendimiento" />
+         <HelpItem 
+          text="👨‍🌾 Gestiona agricultores asignados y revisa sus cultivos" 
+        />
+          <HelpItem 
+          text="📊 Analiza reportes y estadísticas de productividad" 
+        />
+         <HelpItem 
+          text="💡 Genera recomendaciones basadas en datos científicos" 
+        />
+        {!isConnected && (
+          <HelpItem text="📱 Los datos se actualizarán cuando recuperes la conexión" />
+        )}
       </View>
     </View>
   </View>
@@ -372,7 +455,7 @@ const EmptyCard = React.memo(({ icon, text, subtext }) => (
   </View>
 ));
 
-// Estilos (se mantienen iguales, solo asegurando que el logoutButton esté definido)
+// Estilos ACTUALIZADOS
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -400,41 +483,6 @@ const styles = StyleSheet.create({
     color: 'white',
     textAlign: 'center',
     opacity: 0.9,
-  },
-  connectionInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  connectionStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  statusOnline: {
-    backgroundColor: '#4caf50',
-  },
-  statusOffline: {
-    backgroundColor: '#f44336',
-  },
-  statusText: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
-  },
-  unsyncedText: {
-    fontSize: 12,
-    color: '#ff9800',
-    fontWeight: '500',
   },
   mainCard: {
     backgroundColor: 'white',
@@ -502,27 +550,63 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '600',
   },
-  // ✅ ESTILO PARA EL BOTÓN DE CERRAR SESIÓN DENTRO DE LA TARJETA
-  logoutButton: { backgroundColor: '#dc2626', padding: 16, borderRadius: 8, alignItems: 'center', marginBottom: 16 },
-  logoutButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+  offlineNotice: {
+    backgroundColor: '#e3f2fd',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196f3',
+  },
+  offlineNoticeText: {
+    fontSize: 12,
+    color: '#1565c0',
+    lineHeight: 16,
+    textAlign: 'center',
+  },
+  logoutButton: {
+    backgroundColor: '#dc2626',
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  logoutButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
   statsSection: {
     marginBottom: 16,
   },
-  farmersSection: {
-    marginBottom: 16,
-  },
-  menuSection: {
-    marginBottom: 16,
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 12,
+  },
+  dataSourceBadge: {
+    fontSize: 10,
+    fontWeight: '600',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    color: '#333',
   },
   statsGrid: {
     flexDirection: 'row',
     gap: 12,
+  },
+  cacheNotice: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
   statCard: {
     flex: 1,
@@ -561,6 +645,12 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     lineHeight: 14,
   },
+  farmersSection: {
+    marginBottom: 16,
+  },
+  menuSection: {
+    marginBottom: 16,
+  },
   farmerCard: {
     backgroundColor: 'white',
     padding: 16,
@@ -582,6 +672,16 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+  },
+  disabledCard: {
+    backgroundColor: '#f5f5f5',
+    opacity: 0.6,
+  },
+  disabledIcon: {
+    opacity: 0.5,
+  },
+  disabledText: {
+    color: '#999',
   },
   menuArrow: {
     fontSize: 20,

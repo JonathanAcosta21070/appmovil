@@ -1,10 +1,11 @@
-// app/scientist/reports.js - VERSIÓN CON AGRUPACIÓN DE BIOFERTILIZANTES
+// app/scientist/reports.js - VERSIÓN CON GUARDADO LOCAL PARA MODO OFFLINE
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   View, Text, ScrollView, StyleSheet, Alert, Dimensions,
   ActivityIndicator, RefreshControl, TouchableOpacity 
 } from 'react-native';
 import { router } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSync } from '../../contexts/SyncContext';
 import { scientistService } from '../../services/scientistService';
 
@@ -12,6 +13,14 @@ const screenWidth = Dimensions.get('window').width;
 
 // Constantes para colores
 const CHART_COLORS = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40'];
+
+// Claves para almacenamiento local
+const STORAGE_KEYS = {
+  RANKING_DATA: 'reports_ranking_data',
+  BIOFERTILIZER_DATA: 'reports_biofertilizer_data',
+  LAST_UPDATE: 'reports_last_update',
+  CACHE_TIMESTAMP: 'reports_cache_timestamp'
+};
 
 // Componente de tarjeta de estadística optimizado
 const StatCard = React.memo(({ title, value, icon = "📊" }) => (
@@ -264,8 +273,6 @@ const BiofertilizerStats = React.memo(({ data, originalData }) => (
       />
     </View>
     
-
-    
     {/* 🔥 NUEVO: Lista de biofertilizantes agrupados */}
     <View style={styles.biofertilizerList}>
       <Text style={styles.listTitle}>🧪 Biofertilizantes registrados:</Text>
@@ -296,13 +303,97 @@ export default function Reports() {
   const [biofertilizerData, setBiofertilizerData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [dataSource, setDataSource] = useState('server'); // 'server' o 'cache'
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [connectionError, setConnectionError] = useState(false);
   
   const { isConnected, unsyncedCount, user } = useSync();
 
-  // Función optimizada para cargar estadísticas
-  const loadGlobalStats = useCallback(async () => {
+  // ✅ NUEVA FUNCIÓN: Guardar datos en cache local
+  const saveToLocalCache = useCallback(async (rankingData, biofertilizerData) => {
+    try {
+      const cacheData = {
+        rankingData,
+        biofertilizerData,
+        timestamp: Date.now(),
+        lastUpdate: new Date().toISOString(),
+        userId: user?.id
+      };
+
+      await AsyncStorage.setItem(STORAGE_KEYS.RANKING_DATA, JSON.stringify(rankingData));
+      await AsyncStorage.setItem(STORAGE_KEYS.BIOFERTILIZER_DATA, JSON.stringify(biofertilizerData));
+      await AsyncStorage.setItem(STORAGE_KEYS.LAST_UPDATE, new Date().toISOString());
+      await AsyncStorage.setItem(STORAGE_KEYS.CACHE_TIMESTAMP, Date.now().toString());
+
+      console.log('💾 Datos de reportes guardados en cache local');
+    } catch (error) {
+      console.log('❌ Error guardando reportes en cache:', error);
+    }
+  }, [user?.id]);
+
+  // ✅ NUEVA FUNCIÓN: Cargar datos desde cache local
+  const loadFromLocalCache = useCallback(async () => {
+    try {
+      console.log('📁 Intentando cargar reportes desde cache...');
+      
+      const [cachedRanking, cachedBiofertilizer, lastUpdateString, cacheTimestamp] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEYS.RANKING_DATA),
+        AsyncStorage.getItem(STORAGE_KEYS.BIOFERTILIZER_DATA),
+        AsyncStorage.getItem(STORAGE_KEYS.LAST_UPDATE),
+        AsyncStorage.getItem(STORAGE_KEYS.CACHE_TIMESTAMP)
+      ]);
+
+      // Verificar si el cache es válido (menos de 1 hora)
+      const isCacheValid = cacheTimestamp && (Date.now() - parseInt(cacheTimestamp)) < 3600000; // 1 hora
+
+      if (cachedRanking && cachedBiofertilizer && isCacheValid) {
+        const rankingData = JSON.parse(cachedRanking);
+        const biofertilizerData = JSON.parse(cachedBiofertilizer);
+        
+        console.log('✅ Reportes cargados desde cache:', {
+          ranking: rankingData.length,
+          biofertilizer: biofertilizerData.length
+        });
+
+        setRankingData(rankingData);
+        setBiofertilizerData(biofertilizerData);
+        setDataSource('cache');
+        setLastUpdate(lastUpdateString ? new Date(lastUpdateString) : new Date());
+        return true;
+      } else {
+        console.log('❌ Cache de reportes no válido o expirado');
+        if (!isCacheValid) {
+          // Limpiar cache expirado
+          await clearLocalCache();
+        }
+        return false;
+      }
+    } catch (error) {
+      console.log('❌ Error cargando reportes desde cache:', error);
+      return false;
+    }
+  }, []);
+
+  // ✅ NUEVA FUNCIÓN: Limpiar cache local
+  const clearLocalCache = useCallback(async () => {
+    try {
+      await AsyncStorage.multiRemove([
+        STORAGE_KEYS.RANKING_DATA,
+        STORAGE_KEYS.BIOFERTILIZER_DATA,
+        STORAGE_KEYS.LAST_UPDATE,
+        STORAGE_KEYS.CACHE_TIMESTAMP
+      ]);
+      console.log('🧹 Cache de reportes limpiado');
+    } catch (error) {
+      console.log('❌ Error limpiando cache de reportes:', error);
+    }
+  }, []);
+
+  // ✅ FUNCIÓN MEJORADA: Cargar estadísticas con soporte offline
+  const loadGlobalStats = useCallback(async (forceRefresh = false) => {
     try {
       setLoading(true);
+      setConnectionError(false);
       
       if (!user?.id) {
         Alert.alert(
@@ -313,37 +404,106 @@ export default function Reports() {
         return;
       }
       
-      const isValidId = user.id.match(/^[0-9a-fA-F]{24}$/);
-      if (!isValidId) {
-        Alert.alert('Error', 'ID de usuario inválido. Por favor, vuelve a iniciar sesión.');
-        return;
-      }
-      
-      const farmers = await scientistService.getFarmers(user.id);
-
-      if (!farmers || farmers.length === 0) {
-        setRankingData([]);
-        await loadBiofertilizerData([]);
-        return;
+      // ✅ ESTRATEGIA: Primero intentar cache si no se fuerza refresh
+      if (!forceRefresh) {
+        const cacheLoaded = await loadFromLocalCache();
+        if (cacheLoaded) {
+          setLoading(false);
+          return;
+        }
       }
 
-      const rankingResults = await processFarmersData(farmers, user.id);
-      const sortedRanking = rankingResults
-        .filter(farmer => farmer.totalProyectos > 0)
-        .sort((a, b) => b.totalProyectos - a.totalProyectos);
+      // ✅ Intentar servidor si hay conexión
+      if (isConnected) {
+        try {
+          console.log('🔄 Cargando reportes desde servidor...');
+          
+          const isValidId = user.id.match(/^[0-9a-fA-F]{24}$/);
+          if (!isValidId) {
+            Alert.alert('Error', 'ID de usuario inválido. Por favor, vuelve a iniciar sesión.');
+            return;
+          }
+          
+          const farmers = await scientistService.getFarmers(user.id);
 
-      setRankingData(sortedRanking);
-      await loadBiofertilizerData(sortedRanking);
+          if (!farmers || farmers.length === 0) {
+            setRankingData([]);
+            setBiofertilizerData([]);
+            return;
+          }
+
+          const rankingResults = await processFarmersData(farmers, user.id);
+          const sortedRanking = rankingResults
+            .filter(farmer => farmer.totalProyectos > 0)
+            .sort((a, b) => b.totalProyectos - a.totalProyectos);
+
+          // Obtener datos de biofertilizantes
+          let biofertilizers = [];
+          try {
+            biofertilizers = await scientistService.getBiofertilizerStats(user.id);
+          } catch (e) {
+            // Método alternativo desde cultivos
+            const allCrops = rankingResults.flatMap(farmer => farmer.cultivos);
+            const biofertilizerStats = {};
+            
+            allCrops.forEach(crop => {
+              const biofertilizer = crop.biofertilizante || crop.fertilizer || 'No especificado';
+              biofertilizerStats[biofertilizer] = (biofertilizerStats[biofertilizer] || 0) + 1;
+            });
+
+            biofertilizers = Object.entries(biofertilizerStats).map(([name, count]) => ({
+              biofertilizante: name,
+              totalProyectos: count
+            }));
+          }
+
+          setRankingData(sortedRanking);
+          setBiofertilizerData(biofertilizers);
+          setDataSource('server');
+          setLastUpdate(new Date());
+
+          // ✅ Guardar en cache local
+          await saveToLocalCache(sortedRanking, biofertilizers);
+
+          console.log('✅ Reportes cargados desde servidor y guardados en cache');
+
+        } catch (error) {
+          console.log('⚠️ Error cargando desde servidor:', error);
+          setConnectionError(true);
+          
+          // ✅ Fallback a cache si hay error de servidor
+          const cacheLoaded = await loadFromLocalCache();
+          if (!cacheLoaded) {
+            // Si no hay cache, mostrar datos vacíos
+            setRankingData([]);
+            setBiofertilizerData([]);
+          }
+        }
+      } else {
+        // ✅ Sin conexión: intentar cargar desde cache
+        console.log('📱 Sin conexión, cargando desde cache...');
+        const cacheLoaded = await loadFromLocalCache();
+        if (!cacheLoaded) {
+          setRankingData([]);
+          setBiofertilizerData([]);
+        }
+      }
 
     } catch (error) {
+      console.log('❌ Error general cargando reportes:', error);
       handleLoadError(error);
-      setRankingData([]);
-      setBiofertilizerData([]);
+      
+      // ✅ Último intento: cargar desde cache
+      const cacheLoaded = await loadFromLocalCache();
+      if (!cacheLoaded) {
+        setRankingData([]);
+        setBiofertilizerData([]);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user]);
+  }, [user, isConnected, loadFromLocalCache, saveToLocalCache]);
 
   // Procesar datos de agricultores
   const processFarmersData = useCallback(async (farmers, userId) => {
@@ -371,30 +531,6 @@ export default function Reports() {
     return await Promise.all(rankingPromises);
   }, []);
 
-  // Cargar datos de biofertilizantes
-  const loadBiofertilizerData = useCallback(async (rankingResults) => {
-    try {
-      const biofertilizers = await scientistService.getBiofertilizerStats(user.id);
-      setBiofertilizerData(biofertilizers);
-    } catch (e) {
-      // Método alternativo desde cultivos
-      const allCrops = rankingResults.flatMap(farmer => farmer.cultivos);
-      const biofertilizerStats = {};
-      
-      allCrops.forEach(crop => {
-        const biofertilizer = crop.biofertilizante || crop.fertilizer || 'No especificado';
-        biofertilizerStats[biofertilizer] = (biofertilizerStats[biofertilizer] || 0) + 1;
-      });
-
-      const biofertilizers = Object.entries(biofertilizerStats).map(([name, count]) => ({
-        biofertilizante: name,
-        totalProyectos: count
-      }));
-
-      setBiofertilizerData(biofertilizers);
-    }
-  }, [user.id]);
-
   // Manejar errores de carga
   const handleLoadError = useCallback((error) => {
     if (error.message.includes('401') || error.message.includes('Token')) {
@@ -404,7 +540,7 @@ export default function Reports() {
         [{ text: 'OK', onPress: () => router.push('/login') }]
       );
     } else if (error.message.includes('Network') || error.message.includes('Timeout')) {
-      Alert.alert('Error de conexión', 'Verifica tu conexión a internet e intenta nuevamente.');
+      // No mostrar alerta aquí, ya manejamos el estado connectionError
     }
   }, []);
 
@@ -413,39 +549,49 @@ export default function Reports() {
   }, [loadGlobalStats]);
 
   const onRefresh = useCallback(async () => {
+    if (!isConnected) {
+      Alert.alert('Sin conexión', 'No puedes actualizar los datos sin conexión a internet');
+      setRefreshing(false);
+      return;
+    }
     setRefreshing(true);
-    await loadGlobalStats();
-  }, [loadGlobalStats]);
-
-
+    setConnectionError(false);
+    await loadGlobalStats(true); // Forzar refresh desde servidor
+  }, [loadGlobalStats, isConnected]);
 
   const HeaderSection = useMemo(() => (
     <View style={styles.header}>
       <Text style={styles.title}>📊 Reportes y Estadísticas</Text>
       <Text style={styles.subtitle}>
-        Análisis global de datos agrícolas
+        {connectionError ? "Error de conexión - Modo offline" :
+         isConnected ? "Datos sincronizados" : "Modo offline"}
       </Text>
     </View>
-  ), []);
+  ), [isConnected, connectionError]);
 
-const StatsSection = useMemo(() => (
-  <View style={styles.statsSection}>
-    <Text style={styles.sectionTitle}>📈 Resumen General</Text>
-    
-    <View style={styles.statsGrid}>
-      <StatCard 
-        title="Agricultores Analizados"
-        value={rankingData.length}
-        icon="👥"
-      />
-      <StatCard 
-        title="Proyectos Totales"
-        value={rankingData.reduce((sum, item) => sum + (item.totalProyectos || 0), 0)}
-        icon="🌱"
-      />
+  const StatsSection = useMemo(() => (
+    <View style={styles.statsSection}>
+      <Text style={styles.sectionTitle}>📈 Resumen General</Text>
+      
+      <View style={styles.statsGrid}>
+        <StatCard 
+          title="Agricultores Analizados"
+          value={rankingData.length}
+          icon="👥"
+        />
+        <StatCard 
+          title="Proyectos Totales"
+          value={rankingData.reduce((sum, item) => sum + (item.totalProyectos || 0), 0)}
+          icon="🌱"
+        />
+        <StatCard 
+          title="Biofertilizantes"
+          value={biofertilizerData.length}
+          icon="🧪"
+        />
+      </View>
     </View>
-  </View>
-), [rankingData]);
+  ), [rankingData, biofertilizerData]);
 
   const ChartsSection = useMemo(() => (
     <View style={styles.chartsSection}>
@@ -468,20 +614,25 @@ const StatsSection = useMemo(() => (
       <View style={styles.helpCard}>
         <Text style={styles.helpTitle}>💡 Información del Reporte</Text>
         <View style={styles.helpList}>
-          <HelpItem text={`Agricultores analizados: ${rankingData.length}`} />
-          <HelpItem text={`Proyectos en ranking: ${rankingData.reduce((sum, item) => sum + (item.totalProyectos || 0), 0)}`} />
-          <HelpItem text={`Biofertilizantes registrados: ${biofertilizerData.length}`} />
-          <HelpItem text={`Fecha de generación: ${new Date().toLocaleDateString('es-MX')}`} />
+          <HelpItem text="📊 Este reporte resume la actividad reciente y el rendimiento de los agricultores y sus cultivos" />
+           <HelpItem text="📶 Si no hay internet, verás la última información guardada en tu dispositivo; los datos se sincronizarán cuando vuelvas a estar conectado" />
+            <HelpItem text="⚙️ Los datos se actualizan automáticamente cuando hay conexión, reflejando información en tiempo real" />
+             <HelpItem text="📈 Las gráficas te ayudan a comparar el desempeño entre agricultores y detectar áreas de mejora" />
         </View>
       </View>
     </View>
-  ), [rankingData, biofertilizerData]);
+  ), [rankingData, biofertilizerData, dataSource]);
 
   if (loading && !refreshing) {
     return (
       <View style={styles.loadingScreen}>
         <ActivityIndicator size="large" color="#7b1fa2" />
         <Text style={styles.loadingText}>Cargando reportes...</Text>
+        {connectionError && (
+          <Text style={styles.loadingSubtext}>
+            Recuperando datos desde cache...
+          </Text>
+        )}
       </View>
     );
   }
@@ -491,7 +642,13 @@ const StatsSection = useMemo(() => (
       style={styles.container}
       contentContainerStyle={styles.contentContainer}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        <RefreshControl 
+          refreshing={refreshing} 
+          onRefresh={onRefresh}
+          enabled={isConnected && !connectionError}
+          colors={['#7b1fa2']}
+          tintColor="#7b1fa2"
+        />
       }
       showsVerticalScrollIndicator={true}
     >
@@ -500,6 +657,15 @@ const StatsSection = useMemo(() => (
       {StatsSection}
       {ChartsSection}
       {HelpSection}
+
+      {/* ✅ Botón de reintento si hay error de conexión */}
+      {connectionError && isConnected && (
+        <View style={styles.retrySection}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => loadGlobalStats(true)}>
+            <Text style={styles.retryButtonText}>🔄 Reintentar conexión con servidor</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.bottomSpacing} />
     </ScrollView>
@@ -513,7 +679,7 @@ const HelpItem = React.memo(({ text }) => (
   </View>
 ));
 
-// Estilos
+// Estilos actualizados con nuevos componentes
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -534,6 +700,12 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 10,
   },
+  loadingSubtext: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
   header: {
     backgroundColor: '#7b1fa2',
     padding: 20,
@@ -553,41 +725,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     opacity: 0.9,
   },
-  connectionInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    padding: 12,
-    borderRadius: 8,
+  // ✅ NUEVOS ESTILOS PARA BOTÓN DE REINTENTO
+  retrySection: {
     marginBottom: 16,
   },
-  connectionStatus: {
-    flexDirection: 'row',
+  retryButton: {
+    backgroundColor: '#7b1fa2',
+    padding: 16,
+    borderRadius: 8,
     alignItems: 'center',
   },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
+  retryButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
-  statusOnline: {
-    backgroundColor: '#4caf50',
-  },
-  statusOffline: {
-    backgroundColor: '#f44336',
-  },
-  statusText: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
-  },
-  unsyncedText: {
-    fontSize: 12,
-    color: '#ff9800',
-    fontWeight: '500',
-  },
+  // ... (el resto de los estilos se mantienen igual)
   statsSection: {
     marginBottom: 16,
   },
@@ -758,20 +911,6 @@ const styles = StyleSheet.create({
   },
   statItem: {
     alignItems: 'center',
-  },
-  // 🔥 NUEVOS ESTILOS PARA AGRUPACIÓN DE BIOFERTILIZANTES
-  groupingInfo: {
-    marginTop: 8,
-    padding: 8,
-    backgroundColor: '#e3f2fd',
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-  groupingText: {
-    fontSize: 11,
-    color: '#1976d2',
-    fontWeight: '500',
-    textAlign: 'center',
   },
   biofertilizerList: {
     marginTop: 12,

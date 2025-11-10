@@ -1,8 +1,15 @@
-// services/scientistService.js - VERSIÓN COMPLETA Y CORREGIDA
+// services/scientistService.js - VERSIÓN COMPLETA CON CACHE OFFLINE
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import API_CONFIG from '../config/api';
+import NetInfo from '@react-native-community/netinfo';
 
 const API_BASE_URL = API_CONFIG.API_BASE_URL;
+
+// Función para verificar conexión
+const checkConnection = async () => {
+  const netInfo = await NetInfo.fetch();
+  return netInfo.isConnected;
+};
 
 // Función para fetch con timeout
 const fetchWithTimeout = (url, options = {}, timeout = 15000) => {
@@ -58,6 +65,226 @@ const handleResponse = async (response) => {
 };
 
 export const scientistService = {
+  // Variable para estado de conexión
+  isConnected: true,
+
+  // Inicializar verificación de conexión
+  async initConnectionListener() {
+    NetInfo.addEventListener(state => {
+      this.isConnected = state.isConnected;
+      console.log('📶 ScientistService - Estado conexión:', state.isConnected ? 'Conectado' : 'Desconectado');
+    });
+  },
+
+  // ========== FUNCIONES DE CACHE OFFLINE ==========
+
+  // Función para obtener agricultores con soporte offline
+  async getFarmersWithCache(userId, forceRefresh = false) {
+    try {
+      // Primero intentar cargar desde cache si no se fuerza refresh
+      if (!forceRefresh) {
+        const cachedFarmers = await this.loadCachedFarmers(userId);
+        if (cachedFarmers.length > 0) {
+          console.log('📁 [CACHE] Usando agricultores en cache:', cachedFarmers.length);
+          return cachedFarmers;
+        }
+      }
+
+      // Si no hay cache o se fuerza refresh, cargar del servidor
+      const isConnected = await checkConnection();
+      if (isConnected) {
+        console.log('🔄 [CACHE] Cargando agricultores desde servidor...');
+        const farmers = await this.getFarmers(userId);
+        
+        // Guardar en cache
+        await this.cacheFarmersData(userId, farmers);
+        
+        return farmers;
+      } else {
+        console.log('📴 [CACHE] Sin conexión, usando cache disponible');
+        const cachedFarmers = await this.loadCachedFarmers(userId);
+        return cachedFarmers;
+      }
+    } catch (error) {
+      console.log('❌ [CACHE] Error en getFarmersWithCache:', error);
+      
+      // En caso de error, retornar cache si existe
+      const cachedFarmers = await this.loadCachedFarmers(userId);
+      return cachedFarmers;
+    }
+  },
+
+  // Función para obtener cultivos con soporte offline
+  async getFarmerCropsWithCache(userId, farmerId, forceRefresh = false) {
+    try {
+      const cacheKey = `crops_${farmerId}`;
+      
+      if (!forceRefresh) {
+        const cachedCrops = await this.loadCachedCrops(userId, cacheKey);
+        if (cachedCrops.length > 0) {
+          console.log('📁 [CACHE] Usando cultivos en cache para farmer:', farmerId, cachedCrops.length);
+          return cachedCrops;
+        }
+      }
+
+      const isConnected = await checkConnection();
+      if (isConnected) {
+        console.log('🔄 [CACHE] Cargando cultivos desde servidor para farmer:', farmerId);
+        const crops = await this.getFarmerCrops(userId, farmerId);
+        
+        await this.cacheCropsData(userId, cacheKey, crops);
+        
+        return crops;
+      } else {
+        console.log('📴 [CACHE] Sin conexión, usando cache de cultivos');
+        const cachedCrops = await this.loadCachedCrops(userId, cacheKey);
+        return cachedCrops;
+      }
+    } catch (error) {
+      console.log('❌ [CACHE] Error en getFarmerCropsWithCache:', error);
+      
+      const cachedCrops = await this.loadCachedCrops(userId, `crops_${farmerId}`);
+      return cachedCrops;
+    }
+  },
+
+  // Funciones de cache para agricultores
+  async cacheFarmersData(userId, farmersData) {
+    try {
+      const cacheData = {
+        data: farmersData,
+        timestamp: Date.now(),
+        userId: userId,
+        lastUpdated: new Date().toISOString()
+      };
+      await AsyncStorage.setItem(`cachedFarmers_${userId}`, JSON.stringify(cacheData));
+      console.log('💾 [CACHE] Farmers guardados en cache:', farmersData.length);
+    } catch (error) {
+      console.log('❌ [CACHE] Error guardando farmers en cache:', error);
+    }
+  },
+
+  async loadCachedFarmers(userId) {
+    try {
+      const cachedData = await AsyncStorage.getItem(`cachedFarmers_${userId}`);
+      
+      if (cachedData) {
+        const { data, timestamp } = JSON.parse(cachedData);
+        const isStale = Date.now() - timestamp > 300000; // 5 minutos
+        
+        if (!isStale) {
+          return data;
+        } else {
+          console.log('🕒 [CACHE] Cache de farmers está desactualizado');
+        }
+      }
+      
+      return [];
+    } catch (error) {
+      console.log('❌ [CACHE] Error cargando farmers desde cache:', error);
+      return [];
+    }
+  },
+
+  // Funciones de cache para cultivos
+  async cacheCropsData(userId, cacheKey, cropsData) {
+    try {
+      const cacheData = {
+        data: cropsData,
+        timestamp: Date.now(),
+        userId: userId,
+        lastUpdated: new Date().toISOString()
+      };
+      await AsyncStorage.setItem(`cachedCrops_${userId}_${cacheKey}`, JSON.stringify(cacheData));
+      console.log('💾 [CACHE] Cultivos guardados en cache:', cropsData.length);
+    } catch (error) {
+      console.log('❌ [CACHE] Error guardando cultivos en cache:', error);
+    }
+  },
+
+  async loadCachedCrops(userId, cacheKey) {
+    try {
+      const cachedData = await AsyncStorage.getItem(`cachedCrops_${userId}_${cacheKey}`);
+      
+      if (cachedData) {
+        const { data, timestamp } = JSON.parse(cachedData);
+        const isStale = Date.now() - timestamp > 300000; // 5 minutos
+        
+        if (!isStale) {
+          return data;
+        } else {
+          console.log('🕒 [CACHE] Cache de cultivos está desactualizado');
+        }
+      }
+      
+      return [];
+    } catch (error) {
+      console.log('❌ [CACHE] Error cargando cultivos desde cache:', error);
+      return [];
+    }
+  },
+
+  // Función para limpiar cache antiguo
+  async clearOldCache(userId) {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const userKeys = keys.filter(key => key.includes(userId));
+      
+      const now = Date.now();
+      const promises = userKeys.map(async (key) => {
+        try {
+          const data = await AsyncStorage.getItem(key);
+          if (data) {
+            const { timestamp } = JSON.parse(data);
+            if (now - timestamp > 24 * 60 * 60 * 1000) { // 24 horas
+              await AsyncStorage.removeItem(key);
+              console.log('🧹 [CACHE] Cache limpiado:', key);
+            }
+          }
+        } catch (error) {
+          console.log('❌ [CACHE] Error limpiando cache:', key, error);
+        }
+      });
+      
+      await Promise.all(promises);
+    } catch (error) {
+      console.log('❌ [CACHE] Error en clearOldCache:', error);
+    }
+  },
+
+  // Obtener todos los datos offline de una vez
+  async getAllOfflineData(userId) {
+    try {
+      console.log('📁 [CACHE] Cargando todos los datos offline...');
+      
+      const farmers = await this.loadCachedFarmers(userId);
+      const cropsData = {};
+
+      // Cargar cultivos para cada agricultor
+      for (const farmer of farmers) {
+        const crops = await this.loadCachedCrops(userId, `crops_${farmer._id}`);
+        cropsData[farmer._id] = crops;
+      }
+
+      console.log('✅ [CACHE] Datos offline cargados:', {
+        farmers: farmers.length,
+        crops: Object.keys(cropsData).length
+      });
+
+      return {
+        farmers,
+        crops: cropsData,
+        lastUpdated: new Date()
+      };
+
+    } catch (error) {
+      console.log('❌ [CACHE] Error cargando datos offline:', error);
+      return { farmers: [], crops: {}, lastUpdated: null };
+    }
+  },
+
+  // ========== FUNCIONES ORIGINALES DEL SERVICIO ==========
+
   // Obtener agricultores asignados
   async getFarmers(userId) {
     try {
@@ -392,56 +619,19 @@ export const scientistService = {
     }
   },
 
-// En scientistService.js - agregar validación
-async getStats(userId, farmerId) {
-  try {
-    console.log('📊 [SERVICE] Obteniendo estadísticas para:', farmerId);
-    
-    // 🔥 VALIDACIÓN: Verificar que farmerId sea válido
-    if (!farmerId || !farmerId.match(/^[0-9a-fA-F]{24}$/)) {
-      console.log('❌ [SERVICE] farmerId inválido:', farmerId);
-      throw new Error('ID de agricultor inválido');
-    }
-    
-    const response = await fetchWithTimeout(
-      `${API_BASE_URL}/scientist/stats/${farmerId}`,
-      {
-        method: 'GET',
-        headers: { 
-          'Authorization': userId,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    const data = await handleResponse(response);
-    console.log('✅ [SERVICE] Estadísticas obtenidas');
-    return data;
-    
-  } catch (error) {
-    console.log('❌ [SERVICE] Error en getStats:', error);
-    
-    if (error.message.includes('ID de agricultor inválido')) {
-      // Retornar estadísticas vacías para IDs inválidos
-      return {
-        farmer: { name: 'No disponible', location: 'No disponible', mainCrop: 'No disponible' },
-        crops: { total: 0, active: 0, harvested: 0 },
-        sensorData: { total: 0, avgMoisture: 0, avgTemperature: 0, needsWater: 0 },
-        lastUpdated: new Date()
-      };
-    }
-      
-      throw new Error(error.message || 'Error al cargar las estadísticas');
-    }
-  },
-
-  // Obtener datos recientes de sensores
-  async getRecentSensorData(userId) {
+  // Obtener estadísticas
+  async getStats(userId, farmerId) {
     try {
-      console.log('🔍 [SERVICE] Obteniendo datos recientes de sensores');
+      console.log('📊 [SERVICE] Obteniendo estadísticas para:', farmerId);
+      
+      // 🔥 VALIDACIÓN: Verificar que farmerId sea válido
+      if (!farmerId || !farmerId.match(/^[0-9a-fA-F]{24}$/)) {
+        console.log('❌ [SERVICE] farmerId inválido:', farmerId);
+        throw new Error('ID de agricultor inválido');
+      }
       
       const response = await fetchWithTimeout(
-        `${API_BASE_URL}/scientist/recent-sensor-data`,
+        `${API_BASE_URL}/scientist/stats/${farmerId}`,
         {
           method: 'GET',
           headers: { 
@@ -452,29 +642,295 @@ async getStats(userId, farmerId) {
       );
 
       const data = await handleResponse(response);
-      console.log('✅ [SERVICE] Datos recientes obtenidos:', data.length);
+      console.log('✅ [SERVICE] Estadísticas obtenidas');
       return data;
       
     } catch (error) {
-      console.log('❌ [SERVICE] Error en getRecentSensorData:', error);
+      console.log('❌ [SERVICE] Error en getStats:', error);
       
-      // Retornar array vacío si hay error
-      if (error.message.includes('404') || error.message.includes('No se encontraron datos')) {
-        console.log('⚠️ [SERVICE] No se encontraron datos recientes, retornando array vacío');
-        return [];
+      if (error.message.includes('ID de agricultor inválido')) {
+        // Retornar estadísticas vacías para IDs inválidos
+        return {
+          farmer: { name: 'No disponible', location: 'No disponible', mainCrop: 'No disponible' },
+          crops: { total: 0, active: 0, harvested: 0 },
+          sensorData: { total: 0, avgMoisture: 0, avgTemperature: 0, needsWater: 0 },
+          lastUpdated: new Date()
+        };
       }
+        
+        throw new Error(error.message || 'Error al cargar las estadísticas');
+      }
+    },
+
+    // Obtener datos recientes de sensores
+    async getRecentSensorData(userId) {
+      try {
+        console.log('🔍 [SERVICE] Obteniendo datos recientes de sensores');
+        
+        const response = await fetchWithTimeout(
+          `${API_BASE_URL}/scientist/recent-sensor-data`,
+          {
+            method: 'GET',
+            headers: { 
+              'Authorization': userId,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        const data = await handleResponse(response);
+        console.log('✅ [SERVICE] Datos recientes obtenidos:', data.length);
+        return data;
+        
+      } catch (error) {
+        console.log('❌ [SERVICE] Error en getRecentSensorData:', error);
+        
+        // Retornar array vacío si hay error
+        if (error.message.includes('404') || error.message.includes('No se encontraron datos')) {
+          console.log('⚠️ [SERVICE] No se encontraron datos recientes, retornando array vacío');
+          return [];
+        }
+        
+        throw new Error(error.message || 'Error al cargar los datos recientes');
+      }
+    },
+
+    // Obtener recomendaciones anteriores
+    async getPreviousRecommendations(userId, farmerId) {
+      try {
+        console.log('🔍 [SERVICE] Obteniendo recomendaciones anteriores para:', farmerId);
+        
+        const response = await fetchWithTimeout(
+          `${API_BASE_URL}/scientist/recommendations/${farmerId}`,
+          {
+            method: 'GET',
+            headers: { 
+              'Authorization': userId,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        const data = await handleResponse(response);
+        console.log('✅ [SERVICE] Recomendaciones anteriores obtenidas:', data.length);
+        return data;
+        
+      } catch (error) {
+        console.log('❌ [SERVICE] Error en getPreviousRecommendations:', error);
+        
+        // Retornar array vacío si hay error
+        if (error.message.includes('404') || error.message.includes('No se encontraron recomendaciones')) {
+          console.log('⚠️ [SERVICE] No se encontraron recomendaciones anteriores, retornando array vacío');
+          return [];
+        }
+        
+        throw new Error(error.message || 'Error al cargar las recomendaciones anteriores');
+      }
+    },
+
+    // Verificar estado del servicio
+    async checkServiceStatus() {
+      try {
+        console.log('🔍 [SERVICE] Verificando estado del servicio...');
+        
+        const response = await fetchWithTimeout(
+          `${API_BASE_URL}/api/health`,
+          {
+            method: 'GET',
+            timeout: 5000 // 5 segundos para health check
+          }
+        );
+
+        const data = await handleResponse(response);
+        console.log('✅ [SERVICE] Servicio funcionando correctamente');
+        return { status: 'ok', ...data };
+        
+      } catch (error) {
+        console.log('❌ [SERVICE] Error en checkServiceStatus:', error);
+        return { 
+          status: 'error', 
+          message: error.message,
+          online: false 
+        };
+      }
+    },
+
+    // Método adicional: Obtener todos los datos de un agricultor en una sola llamada
+    async getFarmerCompleteData(userId, farmerId) {
+      try {
+        console.log('🔍 [SERVICE] Obteniendo datos completos del agricultor:', farmerId);
+        
+        const [farmer, crops, sensorData, recommendations] = await Promise.all([
+          this.getFarmerDetails(userId, farmerId),
+          this.getFarmerCrops(userId, farmerId),
+          this.getFarmerSensorData(userId, farmerId),
+          this.getPreviousRecommendations(userId, farmerId)
+        ]);
+
+        console.log('✅ [SERVICE] Datos completos del agricultor obtenidos:', {
+          farmer: !!farmer,
+          crops: crops.length,
+          sensorData: sensorData.length,
+          recommendations: recommendations.length
+        });
+
+        return {
+          farmer,
+          crops,
+          sensorData,
+          recommendations
+        };
+        
+      } catch (error) {
+        console.log('❌ [SERVICE] Error en getFarmerCompleteData:', error);
+        throw new Error(error.message || 'Error al cargar los datos completos del agricultor');
+      }
+    },
+
+    // Método adicional: Obtener todos los datos de un cultivo en una sola llamada
+    async getCropCompleteData(userId, cropId) {
+      try {
+        console.log('🔍 [SERVICE] Obteniendo datos completos del cultivo:', cropId);
+        
+        const [crop, sensorData, recommendations] = await Promise.all([
+          this.getCropDetails(userId, cropId),
+          this.getCropSensorData(userId, cropId),
+          this.getCropRecommendations(userId, cropId)
+        ]);
+
+        console.log('✅ [SERVICE] Datos completos del cultivo obtenidos:', {
+          crop: !!crop,
+          sensorData: sensorData.length,
+          recommendations: recommendations.length
+        });
+
+        return {
+          crop,
+          sensorData,
+          recommendations
+        };
+        
+      } catch (error) {
+        console.log('❌ [SERVICE] Error en getCropCompleteData:', error);
+        throw new Error(error.message || 'Error al cargar los datos completos del cultivo');
+      }
+    },
+
+  // 📊 MÉTODOS MEJORADOS PARA ESTADÍSTICAS
+  async getFarmersRanking(userId) {
+    try {
+      console.log('🏆 [SERVICE] Obteniendo ranking de agricultores...');
       
-      throw new Error(error.message || 'Error al cargar los datos recientes');
+      const response = await fetchWithTimeout(
+        `${API_BASE_URL}/scientist/stats/farmers/ranking`,
+        {
+          method: 'GET',
+          headers: { 
+            'Authorization': userId,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Error ${response.status}: No se pudo obtener el ranking`);
+      }
+
+      const data = await response.json();
+      console.log('✅ [SERVICE] Ranking de agricultores obtenido:', data.length);
+      
+      // Si no hay datos, retornar array vacío
+      return Array.isArray(data) ? data : [];
+      
+    } catch (error) {
+      console.log('❌ [SERVICE] Error en getFarmersRanking:', error.message);
+      
+      // Retornar array vacío en caso de error
+      return [];
     }
   },
 
-  // Obtener recomendaciones anteriores
-  async getPreviousRecommendations(userId, farmerId) {
+  async getBiofertilizerStats(userId) {
     try {
-      console.log('🔍 [SERVICE] Obteniendo recomendaciones anteriores para:', farmerId);
+      console.log('🧪 [SERVICE] Obteniendo estadísticas de biofertilizantes...');
       
       const response = await fetchWithTimeout(
-        `${API_BASE_URL}/scientist/recommendations/${farmerId}`,
+        `${API_BASE_URL}/scientist/stats/biofertilizers`,
+        {
+          method: 'GET',
+          headers: { 
+            'Authorization': userId,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Error ${response.status}: No se pudieron obtener estadísticas`);
+      }
+
+      const data = await response.json();
+      console.log('✅ [SERVICE] Estadísticas de biofertilizantes obtenidas:', data.length);
+      
+      // Si no hay datos, retornar array vacío
+      return Array.isArray(data) ? data : [];
+      
+    } catch (error) {
+      console.log('❌ [SERVICE] Error en getBiofertilizerStats:', error.message);
+      
+      // Retornar array vacío en caso de error
+      return [];
+    }
+  },
+
+  // 🔥 NUEVO MÉTODO: Obtener estadísticas simples
+  async getSimpleStats(userId) {
+    try {
+      console.log('📊 [SERVICE] Obteniendo estadísticas simples...');
+      
+      const response = await fetchWithTimeout(
+        `${API_BASE_URL}/scientist/stats/simple`,
+        {
+          method: 'GET',
+          headers: { 
+            'Authorization': userId,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Error ${response.status}: No se pudieron obtener estadísticas`);
+      }
+
+      const data = await response.json();
+      console.log('✅ [SERVICE] Estadísticas simples obtenidas');
+      
+      return data;
+      
+    } catch (error) {
+      console.log('❌ [SERVICE] Error en getSimpleStats:', error.message);
+      
+      // Retornar objeto vacío en caso de error
+      return {
+        rankingAgricultores: [],
+        biofertilizantes: [],
+        general: {
+          totalAgricultores: 0,
+          totalProyectos: 0,
+          totalBiofertilizantes: 0
+        }
+      };
+    }
+  },
+
+  // Obtener todas las estadísticas
+  async getCompleteStats(userId) {
+    try {
+      console.log('📊 [SERVICE] Obteniendo estadísticas completas...');
+      
+      const response = await fetchWithTimeout(
+        `${API_BASE_URL}/scientist/stats/complete`,
         {
           method: 'GET',
           headers: { 
@@ -485,307 +941,82 @@ async getStats(userId, farmerId) {
       );
 
       const data = await handleResponse(response);
-      console.log('✅ [SERVICE] Recomendaciones anteriores obtenidas:', data.length);
+      console.log('✅ [SERVICE] Estadísticas completas obtenidas');
       return data;
       
     } catch (error) {
-      console.log('❌ [SERVICE] Error en getPreviousRecommendations:', error);
-      
-      // Retornar array vacío si hay error
-      if (error.message.includes('404') || error.message.includes('No se encontraron recomendaciones')) {
-        console.log('⚠️ [SERVICE] No se encontraron recomendaciones anteriores, retornando array vacío');
-        return [];
-      }
-      
-      throw new Error(error.message || 'Error al cargar las recomendaciones anteriores');
+      console.log('❌ [SERVICE] Error en getCompleteStats:', error);
+      throw new Error(error.message || 'Error al cargar estadísticas completas');
     }
   },
 
-  // Verificar estado del servicio
-  async checkServiceStatus() {
-    try {
-      console.log('🔍 [SERVICE] Verificando estado del servicio...');
-      
-      const response = await fetchWithTimeout(
-        `${API_BASE_URL}/api/health`,
-        {
-          method: 'GET',
-          timeout: 5000 // 5 segundos para health check
-        }
-      );
+    // 🆕 NUEVO MÉTODO: Obtener datos extendidos del cultivo (incluyendo debug)
+    async getCropExtendedData(userId, cropId) {
+      try {
+        console.log('🔍 [SERVICE] Obteniendo datos EXTENDIDOS del cultivo:', cropId);
+        
+        const [cropData, sensorData, recommendations, debugData] = await Promise.all([
+          this.getCropDetails(userId, cropId),
+          this.getCropSensorData(userId, cropId),
+          this.getCropRecommendations(userId, cropId),
+          this.debugCropData(userId, cropId).catch(error => {
+            console.log('⚠️ [SERVICE] Debug data failed, continuing without it:', error);
+            return null;
+          })
+        ]);
 
-      const data = await handleResponse(response);
-      console.log('✅ [SERVICE] Servicio funcionando correctamente');
-      return { status: 'ok', ...data };
-      
-    } catch (error) {
-      console.log('❌ [SERVICE] Error en checkServiceStatus:', error);
-      return { 
-        status: 'error', 
-        message: error.message,
-        online: false 
-      };
-    }
-  },
+        const extendedData = {
+          crop: cropData,
+          sensorData,
+          recommendations,
+          debug: debugData,
+          summary: {
+            hasCropData: !!cropData,
+            hasSensorData: sensorData.length > 0,
+            hasRecommendations: recommendations.length > 0,
+            hasHistory: cropData?.history?.length > 0,
+            hasFarmerData: !!cropData?.observations || !!cropData?.humidity || !!cropData?.seed || !!cropData?.bioFertilizer
+          }
+        };
 
-  // Método adicional: Obtener todos los datos de un agricultor en una sola llamada
-  async getFarmerCompleteData(userId, farmerId) {
-    try {
-      console.log('🔍 [SERVICE] Obteniendo datos completos del agricultor:', farmerId);
-      
-      const [farmer, crops, sensorData, recommendations] = await Promise.all([
-        this.getFarmerDetails(userId, farmerId),
-        this.getFarmerCrops(userId, farmerId),
-        this.getFarmerSensorData(userId, farmerId),
-        this.getPreviousRecommendations(userId, farmerId)
-      ]);
-
-      console.log('✅ [SERVICE] Datos completos del agricultor obtenidos:', {
-        farmer: !!farmer,
-        crops: crops.length,
-        sensorData: sensorData.length,
-        recommendations: recommendations.length
-      });
-
-      return {
-        farmer,
-        crops,
-        sensorData,
-        recommendations
-      };
-      
-    } catch (error) {
-      console.log('❌ [SERVICE] Error en getFarmerCompleteData:', error);
-      throw new Error(error.message || 'Error al cargar los datos completos del agricultor');
-    }
-  },
-
-  // Método adicional: Obtener todos los datos de un cultivo en una sola llamada
-  async getCropCompleteData(userId, cropId) {
-    try {
-      console.log('🔍 [SERVICE] Obteniendo datos completos del cultivo:', cropId);
-      
-      const [crop, sensorData, recommendations] = await Promise.all([
-        this.getCropDetails(userId, cropId),
-        this.getCropSensorData(userId, cropId),
-        this.getCropRecommendations(userId, cropId)
-      ]);
-
-      console.log('✅ [SERVICE] Datos completos del cultivo obtenidos:', {
-        crop: !!crop,
-        sensorData: sensorData.length,
-        recommendations: recommendations.length
-      });
-
-      return {
-        crop,
-        sensorData,
-        recommendations
-      };
-      
-    } catch (error) {
-      console.log('❌ [SERVICE] Error en getCropCompleteData:', error);
-      throw new Error(error.message || 'Error al cargar los datos completos del cultivo');
-    }
-  },
-// 📊 MÉTODOS MEJORADOS PARA ESTADÍSTICAS
-async getFarmersRanking(userId) {
-  try {
-    console.log('🏆 [SERVICE] Obteniendo ranking de agricultores...');
-    
-    const response = await fetchWithTimeout(
-      `${API_BASE_URL}/scientist/stats/farmers/ranking`,
-      {
-        method: 'GET',
-        headers: { 
-          'Authorization': userId,
-          'Content-Type': 'application/json'
-        }
+        console.log('✅ [SERVICE] Datos extendidos obtenidos:', extendedData.summary);
+        return extendedData;
+        
+      } catch (error) {
+        console.log('❌ [SERVICE] Error en getCropExtendedData:', error);
+        throw new Error(error.message || 'Error al cargar los datos extendidos del cultivo');
       }
-    );
+    },
 
-    if (!response.ok) {
-      throw new Error(`Error ${response.status}: No se pudo obtener el ranking`);
-    }
-
-    const data = await response.json();
-    console.log('✅ [SERVICE] Ranking de agricultores obtenido:', data.length);
-    
-    // Si no hay datos, retornar array vacío
-    return Array.isArray(data) ? data : [];
-    
-  } catch (error) {
-    console.log('❌ [SERVICE] Error en getFarmersRanking:', error.message);
-    
-    // Retornar array vacío en caso de error
-    return [];
-  }
-},
-
-async getBiofertilizerStats(userId) {
-  try {
-    console.log('🧪 [SERVICE] Obteniendo estadísticas de biofertilizantes...');
-    
-    const response = await fetchWithTimeout(
-      `${API_BASE_URL}/scientist/stats/biofertilizers`,
-      {
-        method: 'GET',
-        headers: { 
-          'Authorization': userId,
-          'Content-Type': 'application/json'
-        }
+    // Método utilitario para formatear fechas
+    formatDate(dateString) {
+      if (!dateString) return 'No disponible';
+      try {
+        const date = new Date(dateString);
+        return date.toLocaleDateString('es-ES', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        });
+      } catch (error) {
+        return 'Fecha inválida';
       }
-    );
+    },
 
-    if (!response.ok) {
-      throw new Error(`Error ${response.status}: No se pudieron obtener estadísticas`);
-    }
-
-    const data = await response.json();
-    console.log('✅ [SERVICE] Estadísticas de biofertilizantes obtenidas:', data.length);
-    
-    // Si no hay datos, retornar array vacío
-    return Array.isArray(data) ? data : [];
-    
-  } catch (error) {
-    console.log('❌ [SERVICE] Error en getBiofertilizerStats:', error.message);
-    
-    // Retornar array vacío en caso de error
-    return [];
-  }
-},
-
-// 🔥 NUEVO MÉTODO: Obtener estadísticas simples
-async getSimpleStats(userId) {
-  try {
-    console.log('📊 [SERVICE] Obteniendo estadísticas simples...');
-    
-    const response = await fetchWithTimeout(
-      `${API_BASE_URL}/scientist/stats/simple`,
-      {
-        method: 'GET',
-        headers: { 
-          'Authorization': userId,
-          'Content-Type': 'application/json'
-        }
+    // Método utilitario para calcular días desde una fecha
+    getDaysFromDate(dateString) {
+      if (!dateString) return 0;
+      try {
+        const date = new Date(dateString);
+        const now = new Date();
+        const diffTime = Math.abs(now - date);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays;
+      } catch (error) {
+        return 0;
       }
-    );
-
-    if (!response.ok) {
-      throw new Error(`Error ${response.status}: No se pudieron obtener estadísticas`);
     }
+  };
 
-    const data = await response.json();
-    console.log('✅ [SERVICE] Estadísticas simples obtenidas');
-    
-    return data;
-    
-  } catch (error) {
-    console.log('❌ [SERVICE] Error en getSimpleStats:', error.message);
-    
-    // Retornar objeto vacío en caso de error
-    return {
-      rankingAgricultores: [],
-      biofertilizantes: [],
-      general: {
-        totalAgricultores: 0,
-        totalProyectos: 0,
-        totalBiofertilizantes: 0
-      }
-    };
-  }
-},
-
-// Obtener todas las estadísticas
-async getCompleteStats(userId) {
-  try {
-    console.log('📊 [SERVICE] Obteniendo estadísticas completas...');
-    
-    const response = await fetchWithTimeout(
-      `${API_BASE_URL}/scientist/stats/complete`,
-      {
-        method: 'GET',
-        headers: { 
-          'Authorization': userId,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    const data = await handleResponse(response);
-    console.log('✅ [SERVICE] Estadísticas completas obtenidas');
-    return data;
-    
-  } catch (error) {
-    console.log('❌ [SERVICE] Error en getCompleteStats:', error);
-    throw new Error(error.message || 'Error al cargar estadísticas completas');
-  }
-},
-
-  // 🆕 NUEVO MÉTODO: Obtener datos extendidos del cultivo (incluyendo debug)
-  async getCropExtendedData(userId, cropId) {
-    try {
-      console.log('🔍 [SERVICE] Obteniendo datos EXTENDIDOS del cultivo:', cropId);
-      
-      const [cropData, sensorData, recommendations, debugData] = await Promise.all([
-        this.getCropDetails(userId, cropId),
-        this.getCropSensorData(userId, cropId),
-        this.getCropRecommendations(userId, cropId),
-        this.debugCropData(userId, cropId).catch(error => {
-          console.log('⚠️ [SERVICE] Debug data failed, continuing without it:', error);
-          return null;
-        })
-      ]);
-
-      const extendedData = {
-        crop: cropData,
-        sensorData,
-        recommendations,
-        debug: debugData,
-        summary: {
-          hasCropData: !!cropData,
-          hasSensorData: sensorData.length > 0,
-          hasRecommendations: recommendations.length > 0,
-          hasHistory: cropData?.history?.length > 0,
-          hasFarmerData: !!cropData?.observations || !!cropData?.humidity || !!cropData?.seed || !!cropData?.bioFertilizer
-        }
-      };
-
-      console.log('✅ [SERVICE] Datos extendidos obtenidos:', extendedData.summary);
-      return extendedData;
-      
-    } catch (error) {
-      console.log('❌ [SERVICE] Error en getCropExtendedData:', error);
-      throw new Error(error.message || 'Error al cargar los datos extendidos del cultivo');
-    }
-  },
-
-  // Método utilitario para formatear fechas
-  formatDate(dateString) {
-    if (!dateString) return 'No disponible';
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('es-ES', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
-    } catch (error) {
-      return 'Fecha inválida';
-    }
-  },
-
-  // Método utilitario para calcular días desde una fecha
-  getDaysFromDate(dateString) {
-    if (!dateString) return 0;
-    try {
-      const date = new Date(dateString);
-      const now = new Date();
-      const diffTime = Math.abs(now - date);
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      return diffDays;
-    } catch (error) {
-      return 0;
-    }
-  }
-};
+// Inicializar el listener de conexión al cargar el módulo
+scientistService.initConnectionListener().catch(console.error);

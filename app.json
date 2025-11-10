@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Chinampa",
-    "slug": "chinampa",
+    "slug": "mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -70,6 +70,7 @@
       "eas": {
         "projectId": "646fe2c6-1ad2-4bef-bdfa-14af290fa079"
       }
-    }
+    },
+    "owner": "jona3412"
   }
 }

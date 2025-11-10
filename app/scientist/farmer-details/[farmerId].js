@@ -1,4 +1,4 @@
-// app/scientist/farmer-details.js
+// app/scientist/farmer-details.js 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert,
@@ -22,59 +22,104 @@ export default function FarmerDetails() {
   const [sensorData, setSensorData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [dataSource, setDataSource] = useState("server"); // server o cache
   
-  const { isConnected, unsyncedCount, user } = useSync();
+  const { isConnected, user } = useSync();
 
   const getCropStatusColor = useCallback((status) => {
     return CROP_STATUS_COLORS[status?.toLowerCase()] || CROP_STATUS_COLORS.default;
   }, []);
 
-  const loadFarmerDetails = useCallback(async () => {
+  // ✅ NUEVA FUNCIÓN: carga con cache + fallback offline
+  const loadFarmerDetails = useCallback(async (forceRefresh = false) => {
     try {
       setIsLoading(true);
-      
-      const [farmerData, cropsData, sensorData] = await Promise.all([
-        scientistService.getFarmerDetails(user.id, farmerId),
-        scientistService.getFarmerCrops(user.id, farmerId),
-        scientistService.getFarmerSensorData(user.id, farmerId)
-      ]);
+
+      let farmerData = null;
+      let cropsData = [];
+      let sensorInfo = [];
+
+      // ✅ Intentar servidor (si hay conexión)
+      if (isConnected && !forceRefresh) {
+        try {
+          farmerData = await scientistService.getFarmerDetails(user.id, farmerId);
+          setDataSource("server");
+        } catch (error) {
+          console.log("⚠️ Error server farmer:", error);
+        }
+      }
+
+      // ✅ Fallback cuando no hay conexión o error
+      if (!farmerData) {
+        farmerData = {
+          _id: farmerId,
+          name: 'Agricultor',
+          email: 'email@ejemplo.com',
+          ubicacion: 'Ubicación no disponible',
+          cultivo: 'Cultivo no especificado'
+        };
+        setDataSource("cache");
+      }
+
+      // ✅ Cargar cultivos con cache local
+      try {
+        cropsData = await scientistService.getFarmerCropsWithCache(
+          user.id,
+          farmerId,
+          forceRefresh
+        );
+      } catch (error) {
+        console.log("⚠️ Error cultivos:", error);
+        cropsData = [];
+      }
+
+      // ✅ Sensores solo si hay conexión
+      if (isConnected) {
+        try {
+          sensorInfo = await scientistService.getFarmerSensorData(user.id, farmerId);
+        } catch (error) {
+          console.log("⚠️ Error sensor data:", error);
+          sensorInfo = [];
+        }
+      }
 
       setFarmer(farmerData);
-      setCrops(cropsData || []);
-      setSensorData(sensorData || []);
+      setCrops(cropsData);
+      setSensorData(sensorInfo);
 
     } catch (error) {
-      Alert.alert('Error', 'No se pudieron cargar los detalles del agricultor');
+      console.log("❌ Error general loadFarmerDetails:", error);
+      Alert.alert("Error", "No se pudieron cargar los detalles del agricultor");
     } finally {
       setIsLoading(false);
       setRefreshing(false);
     }
-  }, [farmerId, user.id]);
+  }, [farmerId, user.id, isConnected]);
 
   useEffect(() => {
     loadFarmerDetails();
-  }, [loadFarmerDetails]);
+  }, [loadFarmerDetails, farmerId]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadFarmerDetails();
+    await loadFarmerDetails(true);
   }, [loadFarmerDetails]);
 
+
   const getLatestSensorData = useCallback((cropName, location) => {
-    return sensorData.find(data => 
+    return sensorData.find(data =>
       data.crop === cropName && data.location === location
     );
   }, [sensorData]);
-
 
   const HeaderSection = useMemo(() => (
     <View style={styles.header}>
       <Text style={styles.title}>👨‍🌾 Detalles del Agricultor</Text>
       <Text style={styles.subtitle}>
-        Información completa y cultivos
+        {isConnected ? "Datos sincronizados" : "Modo offline"}
       </Text>
     </View>
-  ), []);
+  ), [isConnected]);
 
   if (isLoading && !refreshing) {
     return (
@@ -97,62 +142,56 @@ export default function FarmerDetails() {
   }
 
   return (
-    <ScrollView 
+    <ScrollView
       style={styles.container}
       contentContainerStyle={styles.contentContainer}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        <RefreshControl 
+          refreshing={refreshing} 
+          onRefresh={onRefresh}
+          enabled={isConnected}
+        />
       }
       showsVerticalScrollIndicator={true}
     >
       {HeaderSection}
 
-
-      {/* Tarjeta principal */}
+      {/* ✅ Tarjeta principal */}
       <View style={styles.mainCard}>
         <View style={styles.cardHeader}>
           <View style={styles.cardTitleContainer}>
             <Text style={styles.cardIcon}>👨‍🌾</Text>
             <View style={styles.cardTitleText}>
               <Text style={styles.cardName}>{farmer.name}</Text>
-              <Text style={styles.cardSubtitle}>
-                Agricultor asignado
-              </Text>
+              <Text style={styles.cardSubtitle}>Agricultor asignado</Text>
             </View>
           </View>
-          
-          <View style={[styles.statusBadge, { backgroundColor: '#c744ffff' }]}>
-            <Text style={styles.statusText}>
-              Activo
-            </Text>
+          <View style={[styles.statusBadge, { backgroundColor: "#c744ffff" }]}>
+            <Text style={styles.statusText}>Activo</Text>
           </View>
         </View>
 
         <View style={styles.cardDetails}>
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>Email:</Text>
-            <Text style={styles.detailValue}>
-              {farmer.email || 'No disponible'}
-            </Text>
+            <Text style={styles.detailValue}>{farmer.email || "No disponible"}</Text>
           </View>
 
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>Total Cultivos:</Text>
-            <Text style={styles.detailValue}>
-              {crops.length}
-            </Text>
+            <Text style={styles.detailValue}>{crops.length}</Text>
           </View>
         </View>
       </View>
 
-      {/* Cultivos */}
+      {/* ✅ Sección de cultivos */}
       <CropsSection 
-        crops={crops} 
+        crops={crops}
         getLatestSensorData={getLatestSensorData}
         getCropStatusColor={getCropStatusColor}
       />
 
-      {/* Ayuda */}
+      {/* ✅ Sección de ayuda */}
       <HelpSection />
 
       <View style={styles.bottomSpacing} />
@@ -160,15 +199,20 @@ export default function FarmerDetails() {
   );
 }
 
+
+//---------------------------
+// COMPONENTES REUTILIZADOS
+//---------------------------
+
 const CropsSection = React.memo(({ crops, getLatestSensorData, getCropStatusColor }) => (
   <View style={styles.cropsSection}>
     <Text style={styles.sectionTitle}>🌱 Cultivos del Agricultor</Text>
-    
+
     {crops.length === 0 ? (
       <EmptyCropsCard />
     ) : (
-      crops.map((crop) => (
-        <CropCard 
+      crops.map(crop => (
+        <CropCard
           key={crop._id}
           crop={crop}
           getLatestSensorData={getLatestSensorData}
@@ -179,11 +223,12 @@ const CropsSection = React.memo(({ crops, getLatestSensorData, getCropStatusColo
   </View>
 ));
 
+
 const CropCard = React.memo(({ crop, getLatestSensorData, getCropStatusColor }) => {
   const latestData = getLatestSensorData(crop.crop, crop.location);
-  
+
   return (
-    <TouchableOpacity 
+    <TouchableOpacity
       style={styles.cropCard}
       onPress={() => router.push(`/scientist/crop-details/${crop._id}`)}
     >
@@ -192,15 +237,12 @@ const CropCard = React.memo(({ crop, getLatestSensorData, getCropStatusColor }) 
           <Text style={styles.cardIcon}>🌿</Text>
           <View style={styles.cardTitleText}>
             <Text style={styles.cardName}>{crop.crop}</Text>
-            <Text style={styles.cardSubtitle}>
-              📍 {crop.location}
-            </Text>
+            <Text style={styles.cardSubtitle}>📍 {crop.location}</Text>
           </View>
         </View>
+
         <View style={[styles.statusBadge, { backgroundColor: getCropStatusColor(crop.status) }]}>
-          <Text style={styles.statusText}>
-            {crop.status?.toUpperCase() || 'ACTIVO'}
-          </Text>
+          <Text style={styles.statusText}>{crop.status?.toUpperCase() || "ACTIVO"}</Text>
         </View>
       </View>
 
@@ -208,28 +250,29 @@ const CropCard = React.memo(({ crop, getLatestSensorData, getCropStatusColor }) 
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Iniciado:</Text>
           <Text style={styles.detailValue}>
-            {crop.sowingDate ? new Date(crop.sowingDate).toLocaleDateString('es-MX') : 'No especificado'}
+            {crop.sowingDate
+              ? new Date(crop.sowingDate).toLocaleDateString("es-MX")
+              : "No especificado"}
           </Text>
         </View>
 
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Acciones:</Text>
-          <Text style={styles.detailValue}>
-            {crop.history?.length || 0} registradas
-          </Text>
+          <Text style={styles.detailValue}>{crop.history?.length || 0} registradas</Text>
         </View>
 
         {latestData && (
           <>
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Humedad:</Text>
-              <Text style={[styles.detailValue, { color: '#2196f3' }]}>
+              <Text style={[styles.detailValue, { color: "#2196f3" }]}>
                 {latestData.moisture}%
               </Text>
             </View>
+
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Temperatura:</Text>
-              <Text style={[styles.detailValue, { color: '#ff9800' }]}>
+              <Text style={[styles.detailValue, { color: "#ff9800" }]}>
                 {latestData.temperature}°C
               </Text>
             </View>
@@ -239,9 +282,7 @@ const CropCard = React.memo(({ crop, getLatestSensorData, getCropStatusColor }) 
         {crop.bioFertilizer && (
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>Biofertilizante:</Text>
-            <Text style={styles.detailValue}>
-              {crop.bioFertilizer}
-            </Text>
+            <Text style={styles.detailValue}>{crop.bioFertilizer}</Text>
           </View>
         )}
       </View>
@@ -249,24 +290,24 @@ const CropCard = React.memo(({ crop, getLatestSensorData, getCropStatusColor }) 
   );
 });
 
+
 const EmptyCropsCard = React.memo(() => (
   <View style={styles.emptyCard}>
     <Text style={styles.emptyIcon}>🌱</Text>
     <Text style={styles.emptyText}>No hay cultivos activos</Text>
-    <Text style={styles.emptySubtext}>
-      Este agricultor no tiene cultivos registrados
-    </Text>
+    <Text style={styles.emptySubtext}>Este agricultor no tiene cultivos registrados</Text>
   </View>
 ));
+
 
 const HelpSection = React.memo(() => (
   <View style={styles.helpSection}>
     <View style={styles.helpCard}>
       <Text style={styles.helpTitle}>💡 Información del Agricultor</Text>
       <View style={styles.helpList}>
-        <HelpItem text="Toca un cultivo para ver detalles completos" />
-        <HelpItem text="Los datos de sensores se actualizan automáticamente" />
-        <HelpItem text="Puedes generar recomendaciones desde el panel principal" />
+        <HelpItem text="👆 Toca un cultivo para ver detalles completos" />
+        <HelpItem text="📈 Revisa el estado de cada cultivo por el color de la etiqueta." />
+        <HelpItem text="💡 Puedes generar recomendaciones personalizadas desde el panel principal del científico" />
       </View>
     </View>
   </View>
@@ -279,7 +320,8 @@ const HelpItem = React.memo(({ text }) => (
   </View>
 ));
 
-// Estilos (iguales al original)
+
+// Estilos (eliminados los estilos del banner de datos)
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -525,5 +567,5 @@ const styles = StyleSheet.create({
   },
   bottomSpacing: {
     height: 40,
-  },
+  }
 });

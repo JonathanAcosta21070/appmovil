@@ -1,4 +1,4 @@
-// contexts/SyncContext.js - VERSIÓN COMPLETA CORREGIDA
+// contexts/SyncContext.js - VERSIÓN COMPLETA CORREGIDA + scientistService integrado
 import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
@@ -33,7 +33,7 @@ export const SyncProvider = ({ children }) => {
       const wasDisconnected = !isConnected && state.isConnected;
       setIsConnected(state.isConnected);
       console.log('📶 Estado conexión:', state.isConnected ? 'Conectado' : 'Desconectado');
-      
+
       if (wasDisconnected && user?.id && !refreshInProgress.current) {
         console.log('🔄 Reconectado a internet - actualizando cache...');
         refreshInProgress.current = true;
@@ -48,37 +48,39 @@ export const SyncProvider = ({ children }) => {
       await checkPendingSync();
       await loadLastSync();
     };
-    
+
     initializeData();
 
     return () => unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-useEffect(() => {
-  if (!isConnected || !user?.id || refreshInProgress.current) return;
+  useEffect(() => {
+    if (!isConnected || !user?.id || refreshInProgress.current) return;
 
-  const needsRefresh = !lastCacheUpdate || (Date.now() - lastCacheUpdate > 300000);
-  
-  if (needsRefresh && !refreshInProgress.current) {
-    console.log('🔄 Cache necesita actualización, refrescando...');
-    refreshInProgress.current = true;
-    
-    const refreshCacheSafely = async () => {
-      try {
-        await refreshCache();
-      } catch (error) {
-        console.log('❌ Error en refresh cache:', error);
-      } finally {
-        refreshInProgress.current = false;
-        setLastCacheUpdate(Date.now());
-      }
-    };
-    
-    refreshCacheSafely();
-  }
-}, [isConnected, user, lastCacheUpdate]);
+    const needsRefresh = !lastCacheUpdate || (Date.now() - lastCacheUpdate > 300000);
 
-  // 🔧 FUNCIÓN: VERIFICAR DATOS PENDIENTES - ESTA ES LA QUE FALTABA
+    if (needsRefresh && !refreshInProgress.current) {
+      console.log('🔄 Cache necesita actualización, refrescando...');
+      refreshInProgress.current = true;
+
+      const refreshCacheSafely = async () => {
+        try {
+          await refreshCache();
+        } catch (error) {
+          console.log('❌ Error en refresh cache:', error);
+        } finally {
+          refreshInProgress.current = false;
+          setLastCacheUpdate(Date.now());
+        }
+      };
+
+      refreshCacheSafely();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, user, lastCacheUpdate]);
+
+  // 🔧 FUNCIÓN: VERIFICAR DATOS PENDIENTES
   const checkPendingSync = async () => {
     try {
       const localCrops = await getLocalCrops();
@@ -92,12 +94,13 @@ useEffect(() => {
       return 0;
     }
   };
-  // 🔧 FUNCIÓN: CARGAR USUARIO - ESTA ES LA QUE FALTABA EN EL VALUE
+
+  // 🔧 FUNCIÓN: CARGAR USUARIO
   const loadUser = async () => {
     try {
       console.log('🔄 Cargando usuario desde AsyncStorage...');
       const userData = await AsyncStorage.getItem('user');
-      
+
       if (userData) {
         const userObj = JSON.parse(userData);
         setUser(userObj);
@@ -128,56 +131,57 @@ useEffect(() => {
     }
   };
 
-
   // FUNCIÓN PARA ACTUALIZAR EL CACHE CON DATOS ACTUALES
   const refreshCache = async () => {
-  if (!user?.id || !isConnected) {
-    console.log('🚫 Refresh cache cancelado - sin usuario o conexión');
-    return;
-  }
-  
-  try {
-    console.log('🔄 Actualizando cache...');
-    
-    const localCrops = await getLocalCrops();
-    const url = `${API_BASE_URL}/farmer/crops`;
-    
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': user.id.toString(),
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (response.ok) {
-      const serverData = await response.json();
-      console.log('✅ Datos del servidor recibidos:', serverData.length);
-      
-      const localUnsynced = localCrops.filter(crop => !crop.synced);
-      const allData = [...serverData, ...localUnsynced];
-      
-      await cacheUserCrops(allData);
-      console.log('💾 Cache actualizado correctamente');
+    if (!user?.id || !isConnected) {
+      console.log('🚫 Refresh cache cancelado - sin usuario o conexión');
+      return;
     }
-  } catch (error) {
-    console.log('❌ Error actualizando cache:', error.message);
-  }
-};
+
+    try {
+      console.log('🔄 Actualizando cache...');
+
+      const localCrops = await getLocalCrops();
+      const url = `${API_BASE_URL}/farmer/crops`;
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': user.id.toString(),
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const serverData = await response.json();
+        console.log('✅ Datos del servidor recibidos:', serverData.length);
+
+        const localUnsynced = localCrops.filter(crop => !crop.synced);
+        const allData = [...serverData, ...localUnsynced];
+
+        await cacheUserCrops(allData);
+        console.log('💾 Cache actualizado correctamente');
+      } else {
+        console.log('❌ Error response refresh cache:', response.status);
+      }
+    } catch (error) {
+      console.log('❌ Error actualizando cache:', error.message);
+    }
+  };
 
   // CARGAR CULTIVOS EN CACHE
   const loadCachedCrops = async (forceRefresh = false) => {
     try {
       const cachedData = await AsyncStorage.getItem('cachedCrops');
-      
+
       if (cachedData && !forceRefresh) {
         const { data, timestamp, userId } = JSON.parse(cachedData);
-        
+
         const isCurrentUser = user && user.id === userId;
-        
+
         if (isCurrentUser) {
           const isStale = Date.now() - timestamp > 300000;
-          
+
           if (isStale && isConnected && !refreshInProgress.current) {
             console.log('🔄 Cache desactualizado, refrescando...');
             refreshInProgress.current = true;
@@ -185,7 +189,7 @@ useEffect(() => {
             refreshInProgress.current = false;
             return await loadCachedCrops(true);
           }
-          
+
           setCachedCrops(data);
           console.log('📁 Cultivos en cache cargados:', data.length);
           return data;
@@ -193,19 +197,19 @@ useEffect(() => {
           await AsyncStorage.removeItem('cachedCrops');
         }
       }
-      
+
       if (forceRefresh || !cachedData) {
         console.log('🔄 Cargando datos actuales para cache...');
         const currentCrops = await getUserCrops(false);
-        const activeCrops = currentCrops.filter(crop => 
-          crop.status?.toLowerCase() === 'activo' || 
+        const activeCrops = currentCrops.filter(crop =>
+          crop.status?.toLowerCase() === 'activo' ||
           crop._source === 'local' ||
           !crop.synced
         );
         await cacheUserCrops(activeCrops);
         return activeCrops;
       }
-      
+
       return [];
     } catch (error) {
       console.log('❌ Error cargando cache:', error);
@@ -251,7 +255,7 @@ useEffect(() => {
 
       console.log('🔄 Conectando al servidor...');
       const url = `${API_BASE_URL}/farmer/crops`;
-      
+
       try {
         const response = await fetch(url, {
           method: 'GET',
@@ -265,20 +269,20 @@ useEffect(() => {
         if (response.ok) {
           const serverData = await response.json();
           console.log('✅ Datos del servidor recibidos:', serverData.length);
-          
+
           const serverCropIds = serverData.map(crop => crop._id);
-          const validLocalCrops = localCrops.filter(crop => 
+          const validLocalCrops = localCrops.filter(crop =>
             crop.synced ? serverCropIds.includes(crop._id) : true
           );
-          
+
           const localUnsynced = validLocalCrops.filter(crop => !crop.synced);
           const allData = [...serverData, ...localUnsynced];
-          
+
           console.log('📊 Total datos combinados (limpios):', allData.length);
           return allData;
         } else {
           const errorText = await response.text();
-          console.log('❌ Error del servidor:', response.status);
+          console.log('❌ Error del servidor:', response.status, errorText);
           return localCrops;
         }
       } catch (fetchError) {
@@ -297,11 +301,11 @@ useEffect(() => {
     try {
       const localCropsString = await AsyncStorage.getItem('localCrops') || '[]';
       const localCrops = JSON.parse(localCropsString);
-      
-      const userCrops = user?.id 
+
+      const userCrops = user?.id
         ? localCrops.filter(crop => crop.userId === user.id)
         : localCrops;
-      
+
       console.log('📁 Cultivos locales encontrados:', userCrops.length);
       return userCrops;
     } catch (error) {
@@ -311,89 +315,89 @@ useEffect(() => {
   };
 
   // GUARDAR CULTIVO LOCAL
- const saveCropLocal = async (cropData) => {
-  try {
-    console.log('💾 Iniciando guardado local...');
-    
-    // VALIDAR DATOS ANTES DE GUARDAR
-    if (!cropData.crop || !cropData.location) {
-      throw new Error('Cultivo y ubicación son requeridos');
-    }
-    
-    // GENERAR ID ÚNICO
-    const cropId = `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    const cropToSave = {
-      ...cropData,
-      id: cropId,
-      synced: false,
-      createdAt: new Date().toISOString(),
-      userId: user?.id,
-      _source: 'local',
-      history: cropData.history || [{
-        _id: `action-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        date: new Date().toISOString(),
-        type: cropData.actionType || 'other',
-        seed: cropData.seed || '',
-        action: generateActionDescription(cropData.actionType, cropData.seed, cropData.bioFertilizer),
-        bioFertilizer: cropData.bioFertilizer || '',
-        observations: cropData.observations || '',
-        synced: false
-      }]
-    };
+  const saveCropLocal = async (cropData) => {
+    try {
+      console.log('💾 Iniciando guardado local...');
 
-    console.log('📝 Cultivo a guardar:', {
-      id: cropToSave.id,
-      crop: cropToSave.crop,
-      location: cropToSave.location,
-      history: cropToSave.history?.length || 0
-    });
+      // VALIDAR DATOS ANTES DE GUARDAR
+      if (!cropData.crop || !cropData.location) {
+        throw new Error('Cultivo y ubicación son requeridos');
+      }
 
-    const existingCrops = await getLocalCrops();
-    
-    // VERIFICAR SI YA EXISTE (evitar duplicados)
-    const alreadyExists = existingCrops.some(crop => 
-      crop.crop?.toLowerCase().trim() === cropData.crop.toLowerCase().trim() &&
-      crop.location?.toLowerCase().trim() === cropData.location.toLowerCase().trim() &&
-      !crop.synced
-    );
-    
-    if (alreadyExists) {
-      console.log('⚠️ Cultivo ya existe localmente, actualizando...');
-      // Actualizar cultivo existente en lugar de crear uno nuevo
-      const updatedCrops = existingCrops.map(crop => {
-        if (crop.crop?.toLowerCase().trim() === cropData.crop.toLowerCase().trim() &&
+      // GENERAR ID ÚNICO
+      const cropId = `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      const cropToSave = {
+        ...cropData,
+        id: cropId,
+        synced: false,
+        createdAt: new Date().toISOString(),
+        userId: user?.id,
+        _source: 'local',
+        history: cropData.history || [{
+          _id: `action-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          date: new Date().toISOString(),
+          type: cropData.actionType || 'other',
+          seed: cropData.seed || '',
+          action: generateActionDescription(cropData.actionType, cropData.seed, cropData.bioFertilizer),
+          bioFertilizer: cropData.bioFertilizer || '',
+          observations: cropData.observations || '',
+          synced: false
+        }]
+      };
+
+      console.log('📝 Cultivo a guardar:', {
+        id: cropToSave.id,
+        crop: cropToSave.crop,
+        location: cropToSave.location,
+        history: cropToSave.history?.length || 0
+      });
+
+      const existingCrops = await getLocalCrops();
+
+      // VERIFICAR SI YA EXISTE (evitar duplicados)
+      const alreadyExists = existingCrops.some(crop =>
+        crop.crop?.toLowerCase().trim() === cropData.crop.toLowerCase().trim() &&
+        crop.location?.toLowerCase().trim() === cropData.location.toLowerCase().trim() &&
+        !crop.synced
+      );
+
+      if (alreadyExists) {
+        console.log('⚠️ Cultivo ya existe localmente, actualizando...');
+        // Actualizar cultivo existente en lugar de crear uno nuevo
+        const updatedCrops = existingCrops.map(crop => {
+          if (crop.crop?.toLowerCase().trim() === cropData.crop.toLowerCase().trim() &&
             crop.location?.toLowerCase().trim() === cropData.location.toLowerCase().trim() &&
             !crop.synced) {
-          return {
-            ...crop,
-            ...cropData,
-            updatedAt: new Date().toISOString(),
-            history: [...(crop.history || []), ...(cropToSave.history || [])]
-          };
-        }
-        return crop;
-      });
-      
-      await AsyncStorage.setItem('localCrops', JSON.stringify(updatedCrops));
-    } else {
-      // AGREGAR NUEVO CULTIVO
-      existingCrops.push(cropToSave);
-      await AsyncStorage.setItem('localCrops', JSON.stringify(existingCrops));
+            return {
+              ...crop,
+              ...cropData,
+              updatedAt: new Date().toISOString(),
+              history: [...(crop.history || []), ...(cropToSave.history || [])]
+            };
+          }
+          return crop;
+        });
+
+        await AsyncStorage.setItem('localCrops', JSON.stringify(updatedCrops));
+      } else {
+        // AGREGAR NUEVO CULTIVO
+        existingCrops.push(cropToSave);
+        await AsyncStorage.setItem('localCrops', JSON.stringify(existingCrops));
+      }
+
+      // ACTUALIZAR CACHE
+      await refreshCache();
+      await checkPendingSync();
+
+      console.log('✅ Cultivo guardado localmente correctamente');
+
+      return cropToSave;
+    } catch (error) {
+      console.log('❌ Error guardando localmente:', error);
+      throw error;
     }
-    
-    // ACTUALIZAR CACHE
-    await refreshCache();
-    await checkPendingSync();
-    
-    console.log('✅ Cultivo guardado localmente correctamente');
-    
-    return cropToSave;
-  } catch (error) {
-    console.log('❌ Error guardando localmente:', error);
-    throw error;
-  }
-};
+  };
 
   // GENERAR DESCRIPCIÓN DE ACCIÓN
   const generateActionDescription = (type, seed, bioFertilizer) => {
@@ -433,15 +437,15 @@ useEffect(() => {
     try {
       const localCrops = await getLocalCrops();
       const unsyncedCrops = localCrops.filter(crop => !crop.synced);
-      
+
       console.log(`📤 Encontrados ${unsyncedCrops.length} cultivos pendientes de sincronizar`);
 
       if (unsyncedCrops.length === 0) {
         await updateLastSync();
-        return { 
-          success: true, 
-          message: 'No hay datos pendientes por sincronizar', 
-          synced: 0 
+        return {
+          success: true,
+          message: 'No hay datos pendientes por sincronizar',
+          synced: 0
         };
       }
 
@@ -451,14 +455,14 @@ useEffect(() => {
 
       for (let i = 0; i < unsyncedCrops.length; i++) {
         const crop = unsyncedCrops[i];
-        
+
         try {
           console.log(`🔄 Sincronizando cultivo: ${crop.crop} - ${crop.location}`);
-          
+
           const { id, _source, synced, userId, ...cropToSend } = crop;
-          
-          const lastAction = crop.history && crop.history.length > 0 
-            ? crop.history[crop.history.length - 1] 
+
+          const lastAction = crop.history && crop.history.length > 0
+            ? crop.history[crop.history.length - 1]
             : null;
 
           const payload = {
@@ -487,7 +491,7 @@ useEffect(() => {
           if (response.ok) {
             const result = await response.json();
             console.log('✅ Cultivo sincronizado exitosamente:', result);
-            
+
             await markCropAsSynced(crop.id);
             successCount++;
           } else {
@@ -509,12 +513,12 @@ useEffect(() => {
         console.log('🔄 Actualizando cache después de sincronización...');
         await refreshCache();
       }
-      
+
       await checkPendingSync();
       await updateLastSync();
 
-      const result = { 
-        success: errorCount === 0, 
+      const result = {
+        success: errorCount === 0,
         message: `Sincronización completada: ${successCount} exitosos, ${errorCount} errores`,
         synced: successCount,
         errors: errorCount,
@@ -526,8 +530,8 @@ useEffect(() => {
 
     } catch (error) {
       console.log('❌ Error general en sincronización:', error);
-      return { 
-        success: false, 
+      return {
+        success: false,
         message: `Error en sincronización: ${error.message}`,
         synced: 0,
         errors: 1
@@ -553,17 +557,17 @@ useEffect(() => {
         }
         return crop;
       });
-      
+
       await AsyncStorage.setItem('localCrops', JSON.stringify(updatedCrops));
       console.log(`✅ Cultivo ${cropId} marcado como sincronizado`);
-      
+
       if (cachedCrops.length > 0) {
-        const updatedCache = cachedCrops.map(crop => 
+        const updatedCache = cachedCrops.map(crop =>
           crop.id === cropId ? { ...crop, synced: true, syncedAt: new Date().toISOString() } : crop
         );
         await cacheUserCrops(updatedCache);
       }
-      
+
       return true;
     } catch (error) {
       console.log('❌ Error marcando cultivo como sincronizado:', error);
@@ -576,16 +580,16 @@ useEffect(() => {
     try {
       const localCrops = await getLocalCrops();
       const updatedCrops = localCrops.filter(crop => crop.id !== cropId);
-      
+
       await AsyncStorage.setItem('localCrops', JSON.stringify(updatedCrops));
-      
+
       if (cachedCrops.length > 0) {
         const updatedCache = cachedCrops.filter(crop => crop.id !== cropId);
         await cacheUserCrops(updatedCache);
       }
-      
+
       await checkPendingSync();
-      
+
       return true;
     } catch (error) {
       console.log('❌ Error eliminando cultivo local:', error);
@@ -596,10 +600,10 @@ useEffect(() => {
   // LIMPIAR CACHE DE CULTIVOS ELIMINADOS
   const cleanDeletedCropsFromCache = async () => {
     if (!user?.id || !isConnected) return;
-    
+
     try {
       console.log('🧹 Limpiando cache de cultivos eliminados...');
-      
+
       const url = `${API_BASE_URL}/farmer/crops`;
       const response = await fetch(url, {
         method: 'GET',
@@ -612,11 +616,11 @@ useEffect(() => {
       if (response.ok) {
         const serverData = await response.json();
         const serverCropIds = serverData.map(crop => crop._id);
-        
-        const cleanedCache = cachedCrops.filter(crop => 
+
+        const cleanedCache = cachedCrops.filter(crop =>
           crop._source === 'local' || !crop.synced || serverCropIds.includes(crop._id)
         );
-        
+
         if (cleanedCache.length !== cachedCrops.length) {
           await cacheUserCrops(cleanedCache);
           console.log('✅ Cache limpiado. Removidos:', cachedCrops.length - cleanedCache.length);
@@ -667,74 +671,76 @@ useEffect(() => {
       console.log('❌ Error cargando última sincronización:', error);
     }
   };
-// FUNCIÓN PARA LIMPIAR Y REPARAR DATOS LOCALES
-const repairLocalData = async () => {
-  try {
-    console.log('🔧 Iniciando reparación de datos locales...');
-    
-    const localCrops = await getLocalCrops();
-    console.log('📁 Cultivos locales antes de reparar:', localCrops.length);
-    
-    // FILTRAR DATOS VÁLIDOS
-    const validCrops = localCrops.filter(crop => {
-      const isValid = crop && 
-                     crop.id && 
-                     crop.crop && 
-                     crop.location &&
-                     typeof crop.synced === 'boolean';
-      
-      if (!isValid) {
-        console.log('🗑️ Eliminando cultivo inválido:', crop);
+
+  // FUNCIÓN PARA LIMPIAR Y REPARAR DATOS LOCALES
+  const repairLocalData = async () => {
+    try {
+      console.log('🔧 Iniciando reparación de datos locales...');
+
+      const localCrops = await getLocalCrops();
+      console.log('📁 Cultivos locales antes de reparar:', localCrops.length);
+
+      // FILTRAR DATOS VÁLIDOS
+      const validCrops = localCrops.filter(crop => {
+        const isValid = crop &&
+          crop.id &&
+          crop.crop &&
+          crop.location &&
+          typeof crop.synced === 'boolean';
+
+        if (!isValid) {
+          console.log('🗑️ Eliminando cultivo inválido:', crop);
+        }
+
+        return isValid;
+      });
+
+      // ELIMINAR DUPLICADOS (mismo crop y location)
+      const uniqueCrops = [];
+      const seen = new Set();
+
+      validCrops.forEach(crop => {
+        const key = `${crop.crop?.toLowerCase().trim()}-${crop.location?.toLowerCase().trim()}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueCrops.push(crop);
+        } else {
+          console.log('🔍 Encontrado duplicado, eliminando:', crop.crop, crop.location);
+        }
+      });
+
+      // GUARDAR DATOS REPARADOS
+      await AsyncStorage.setItem('localCrops', JSON.stringify(uniqueCrops));
+
+      // ACTUALIZAR CACHE
+      if (cachedCrops.length > 0) {
+        await cacheUserCrops(uniqueCrops);
       }
-      
-      return isValid;
-    });
-    
-    // ELIMINAR DUPLICADOS (mismo crop y location)
-    const uniqueCrops = [];
-    const seen = new Set();
-    
-    validCrops.forEach(crop => {
-      const key = `${crop.crop?.toLowerCase().trim()}-${crop.location?.toLowerCase().trim()}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        uniqueCrops.push(crop);
-      } else {
-        console.log('🔍 Encontrado duplicado, eliminando:', crop.crop, crop.location);
-      }
-    });
-    
-    // GUARDAR DATOS REPARADOS
-    await AsyncStorage.setItem('localCrops', JSON.stringify(uniqueCrops));
-    
-    // ACTUALIZAR CACHE
-    if (cachedCrops.length > 0) {
-      await cacheUserCrops(uniqueCrops);
+
+      await checkPendingSync();
+
+      console.log('✅ Reparación completada. Cultivos válidos:', uniqueCrops.length);
+      return { success: true, repaired: validCrops.length - uniqueCrops.length };
+
+    } catch (error) {
+      console.log('❌ Error en reparación:', error);
+      return { success: false, error: error.message };
     }
-    
-    await checkPendingSync();
-    
-    console.log('✅ Reparación completada. Cultivos válidos:', uniqueCrops.length);
-    return { success: true, repaired: validCrops.length - uniqueCrops.length };
-    
-  } catch (error) {
-    console.log('❌ Error en reparación:', error);
-    return { success: false, error: error.message };
-  }
-};
+  };
+
   // FORMATEAR FECHA DE SINCRONIZACIÓN
   const formatLastSync = () => {
     if (!lastSync) return 'Nunca';
-    
+
     const now = new Date();
     const diffMs = now - lastSync;
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
-    
+
     if (diffMins < 1) return 'Hace unos segundos';
     if (diffMins < 60) return `Hace ${diffMins} minuto${diffMins > 1 ? 's' : ''}`;
     if (diffHours < 24) return `Hace ${diffHours} hora${diffHours > 1 ? 's' : ''}`;
-    
+
     return lastSync.toLocaleDateString('es-MX', {
       day: '2-digit',
       month: '2-digit',
@@ -743,6 +749,124 @@ const repairLocalData = async () => {
       minute: '2-digit'
     });
   };
+
+  /* ---------------- FUNCIONES PARA SCIENTIST ---------------- */
+
+  // Obtener agricultores del servidor (necesaria si se desea refrescar)
+  const getFarmersFromServer = async () => {
+    if (!user?.id || !isConnected) return [];
+    try {
+      const response = await fetch(`${API_BASE_URL}/scientist/farmers`, {
+        method: 'GET',
+        headers: {
+          'Authorization': user.id.toString(),
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Agricultores recibidos del servidor:', data.length);
+        return data;
+      } else {
+        console.log('❌ Error obteniendo agricultores:', response.status);
+      }
+    } catch (error) {
+      console.log('❌ Error en getFarmersFromServer:', error);
+    }
+    return [];
+  };
+
+  const scientistService = {
+    // Guardar datos de agricultores en cache local
+    async cacheFarmersData(farmersData) {
+      try {
+        const cacheData = {
+          data: farmersData,
+          timestamp: Date.now(),
+          userId: user?.id,
+          lastUpdated: new Date().toISOString()
+        };
+        await AsyncStorage.setItem('cachedFarmers', JSON.stringify(cacheData));
+        console.log('💾 Datos de agricultores guardados en cache:', Array.isArray(farmersData) ? farmersData.length : 'unknown');
+      } catch (error) {
+        console.log('❌ Error guardando farmers en cache:', error);
+      }
+    },
+
+    // Cargar agricultores desde cache
+    async loadCachedFarmers(forceRefresh = false) {
+      try {
+        const cachedData = await AsyncStorage.getItem('cachedFarmers');
+
+        if (cachedData && !forceRefresh) {
+          const { data, timestamp, userId } = JSON.parse(cachedData);
+
+          const isCurrentUser = user && user.id === userId;
+          const isStale = Date.now() - timestamp > 300000; // 5 minutos
+
+          if (isCurrentUser && !isStale) {
+            console.log('📁 Agricultores cargados desde cache:', data.length);
+            return data;
+          }
+        }
+
+        // Si no hay cache o está desactualizado, cargar del servidor
+        if (isConnected && user?.id && !forceRefresh) {
+          const farmers = await getFarmersFromServer();
+          await this.cacheFarmersData(farmers);
+          return farmers;
+        }
+
+        return [];
+      } catch (error) {
+        console.log('❌ Error cargando farmers desde cache:', error);
+        return [];
+      }
+    },
+
+    // Guardar datos de cultivos en cache
+    async cacheCropsData(cropsData) {
+      try {
+        const cacheData = {
+          data: cropsData,
+          timestamp: Date.now(),
+          userId: user?.id,
+          lastUpdated: new Date().toISOString()
+        };
+        await AsyncStorage.setItem('cachedCropsScientist', JSON.stringify(cacheData));
+        console.log('💾 Datos de cultivos guardados en cache:', Array.isArray(cropsData) ? cropsData.length : 'unknown');
+      } catch (error) {
+        console.log('❌ Error guardando cultivos en cache:', error);
+      }
+    },
+
+    // Cargar cultivos desde cache
+    async loadCachedCropsScientist(forceRefresh = false) {
+      try {
+        const cachedData = await AsyncStorage.getItem('cachedCropsScientist');
+
+        if (cachedData && !forceRefresh) {
+          const { data, timestamp, userId } = JSON.parse(cachedData);
+
+          const isCurrentUser = user && user.id === userId;
+          const isStale = Date.now() - timestamp > 300000;
+
+          if (isCurrentUser && !isStale) {
+            console.log('📁 Cultivos cargados desde cache:', data.length);
+            return data;
+          }
+        }
+
+        return [];
+      } catch (error) {
+        console.log('❌ Error cargando cultivos desde cache:', error);
+        return [];
+      }
+    }
+  };
+
+  /* -------------------- VALUE DEL CONTEXTO ----------------------- */
 
   const value = {
     // Estado
@@ -755,9 +879,9 @@ const repairLocalData = async () => {
     lastSync,
     API_BASE_URL,
     cachedCrops,
-    
-    // Funciones - ✅ AGREGAR loadUser AQUÍ
-    loadUser, // ← ESTA ES LA LÍNEA QUE FALTABA
+
+    // Funciones - (incluye loadUser)
+    loadUser,
     saveUser,
     logout,
     getUserCrops,
@@ -771,8 +895,19 @@ const repairLocalData = async () => {
     cacheUserCrops,
     loadCachedCrops,
     refreshCache,
-    cleanDeletedCropsFromCache
-};
+    cleanDeletedCropsFromCache,
+    repairLocalData,
+    markCropAsSynced,
+    updateLastSync,
+    loadLastSync,
+
+    // Nuevas funciones para scientist
+    scientistService,
+    loadCachedFarmers: scientistService.loadCachedFarmers,
+    cacheFarmersData: scientistService.cacheFarmersData,
+    loadCachedCropsScientist: scientistService.loadCachedCropsScientist,
+    cacheCropsData: scientistService.cacheCropsData
+  };
 
   return (
     <SyncContext.Provider value={value}>
