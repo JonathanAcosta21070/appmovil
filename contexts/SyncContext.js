@@ -1,8 +1,9 @@
-// contexts/SyncContext.js - VERSIÓN COMPLETA CORREGIDA + scientistService integrado
+// contexts/SyncContext.js - VERSIÓN COMPLETA ACTUALIZADA CON VALIDACIÓN DE CACHE Y FARMER SERVICE
 import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import API_CONFIG from '../config/api';
+import { farmerService } from '../services/farmerService';
 
 const SyncContext = createContext();
 
@@ -28,6 +29,12 @@ export const SyncProvider = ({ children }) => {
   const refreshInProgress = useRef(false);
   const API_BASE_URL = API_CONFIG.API_BASE_URL;
 
+  // 🔧 FUNCIÓN AUXILIAR: VERIFICAR CONEXIÓN
+  const checkConnection = async () => {
+    const netInfo = await NetInfo.fetch();
+    return netInfo.isConnected;
+  };
+
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
       const wasDisconnected = !isConnected && state.isConnected;
@@ -35,9 +42,11 @@ export const SyncProvider = ({ children }) => {
       console.log('📶 Estado conexión:', state.isConnected ? 'Conectado' : 'Desconectado');
 
       if (wasDisconnected && user?.id && !refreshInProgress.current) {
-        console.log('🔄 Reconectado a internet - actualizando cache...');
+        console.log('🔄 Reconectado - Validando cache contra servidor...');
         refreshInProgress.current = true;
-        refreshCache().finally(() => {
+        
+        // ✅ NUEVA LÓGICA: Validar y limpiar cache
+        validateCacheWithServer().finally(() => {
           refreshInProgress.current = false;
         });
       }
@@ -47,6 +56,11 @@ export const SyncProvider = ({ children }) => {
       await loadUser();
       await checkPendingSync();
       await loadLastSync();
+      
+      // ✅ Validar cache al iniciar si hay conexión
+      if (isConnected && user?.id) {
+        await validateCacheWithServer();
+      }
     };
 
     initializeData();
@@ -79,6 +93,33 @@ export const SyncProvider = ({ children }) => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, user, lastCacheUpdate]);
+
+  // ✅ NUEVA FUNCIÓN: Validar cache contra el servidor
+  const validateCacheWithServer = async () => {
+    if (!user?.id || !isConnected) {
+      console.log('🚫 Validación cancelada - sin usuario o conexión');
+      return;
+    }
+
+    try {
+      console.log('🔍 Validando cache contra servidor...');
+
+      // Para scientists: validar agricultores y cultivos
+      if (user.role === 'scientist') {
+        await scientistService.validateAndCleanCache(user.id);
+      }
+
+      // Para farmers: usar farmer service para validar
+      if (user.role === 'farmer') {
+        await farmerService.validateAndCleanCache(user.id);
+      }
+
+      console.log('✅ Validación de cache completada');
+
+    } catch (error) {
+      console.log('❌ Error en validación de cache:', error);
+    }
+  };
 
   // 🔧 FUNCIÓN: VERIFICAR DATOS PENDIENTES
   const checkPendingSync = async () => {
@@ -777,71 +818,214 @@ export const SyncProvider = ({ children }) => {
     return [];
   };
 
+  // ✅ NUEVAS FUNCIONES MEJORADAS PARA SCIENTIST SERVICE
   const scientistService = {
+    // Validar y limpiar cache contra el servidor
+    async validateAndCleanCache(userId) {
+      try {
+        console.log('🧹 [SCIENTIST] Validando cache contra servidor...');
+        
+        const isConnected = await checkConnection();
+        if (!isConnected) {
+          console.log('📴 [SCIENTIST] Sin conexión, omitiendo validación');
+          return;
+        }
+
+        // Obtener datos del servidor
+        const serverFarmers = await this.getFarmers(userId);
+        const serverFarmerIds = new Set(serverFarmers.map(f => f._id));
+
+        // Limpiar cache de farmers
+        const cachedFarmers = await this.loadCachedFarmers(userId);
+        const validFarmers = cachedFarmers.filter(f => serverFarmerIds.has(f._id));
+        
+        if (validFarmers.length !== cachedFarmers.length) {
+          console.log(`🗑️ [SCIENTIST] Eliminando ${cachedFarmers.length - validFarmers.length} agricultores del cache`);
+          await this.cacheFarmersData(userId, validFarmers);
+        }
+
+        // Limpiar cache de cultivos para cada agricultor
+        for (const farmer of serverFarmers) {
+          const serverCrops = await this.getFarmerCrops(userId, farmer._id);
+          const serverCropIds = new Set(serverCrops.map(c => c._id));
+          
+          const cacheKey = `crops_${farmer._id}`;
+          const cachedCrops = await this.loadCachedCrops(userId, cacheKey);
+          const validCrops = cachedCrops.filter(c => serverCropIds.has(c._id));
+          
+          if (validCrops.length !== cachedCrops.length) {
+            console.log(`🗑️ [SCIENTIST] Eliminando ${cachedCrops.length - validCrops.length} cultivos del cache para farmer ${farmer._id}`);
+            await this.cacheCropsData(userId, cacheKey, validCrops);
+          }
+        }
+
+        console.log('✅ [SCIENTIST] Validación completada');
+        
+      } catch (error) {
+        console.log('❌ [SCIENTIST] Error en validación:', error);
+      }
+    },
+
+    // Limpiar todo el cache de un usuario
+    async clearAllUserCache(userId) {
+      try {
+        console.log('🧹 [SCIENTIST] Limpiando todo el cache del usuario...');
+        
+        const allKeys = await AsyncStorage.getAllKeys();
+        const userKeys = allKeys.filter(key => 
+          key.includes(`_${userId}`) || 
+          key.includes(`cachedFarmers_${userId}`) ||
+          key.includes(`cachedCrops_${userId}`)
+        );
+
+        await AsyncStorage.multiRemove(userKeys);
+        
+        console.log(`✅ [SCIENTIST] ${userKeys.length} entradas eliminadas del cache`);
+        
+      } catch (error) {
+        console.log('❌ [SCIENTIST] Error limpiando cache:', error);
+      }
+    },
+
+    // Forzar refresh completo
+    async forceRefreshAllData(userId) {
+      try {
+        console.log('🔄 [SCIENTIST] Forzando refresh completo de datos...');
+        
+        // Limpiar cache existente
+        await this.clearAllUserCache(userId);
+        
+        // Obtener datos frescos del servidor
+        const farmers = await this.getFarmers(userId);
+        await this.cacheFarmersData(userId, farmers);
+        
+        // Obtener cultivos de cada agricultor
+        for (const farmer of farmers) {
+          const crops = await this.getFarmerCrops(userId, farmer._id);
+          await this.cacheCropsData(userId, `crops_${farmer._id}`, crops);
+        }
+        
+        console.log('✅ [SCIENTIST] Refresh completo finalizado');
+        return { success: true, farmers: farmers.length };
+        
+      } catch (error) {
+        console.log('❌ [SCIENTIST] Error en refresh completo:', error);
+        throw error;
+      }
+    },
+
+    // Función auxiliar para verificar conexión
+    async checkConnection() {
+      const netInfo = await NetInfo.fetch();
+      return netInfo.isConnected;
+    },
+
+    // Simulación de funciones del scientistService original
+    async getFarmers(userId) {
+      return await getFarmersFromServer();
+    },
+
+    async getFarmerCrops(userId, farmerId) {
+      // Implementación simulada - debería reemplazarse con la real
+      return [];
+    },
+
     // Guardar datos de agricultores en cache local
-    async cacheFarmersData(farmersData) {
+    async cacheFarmersData(userId, farmersData) {
       try {
         const cacheData = {
           data: farmersData,
           timestamp: Date.now(),
-          userId: user?.id,
-          lastUpdated: new Date().toISOString()
+          userId: userId,
+          lastUpdated: new Date().toISOString(),
+          expiresAt: Date.now() + (2 * 60 * 1000) // 2 minutos de expiración
         };
-        await AsyncStorage.setItem('cachedFarmers', JSON.stringify(cacheData));
-        console.log('💾 Datos de agricultores guardados en cache:', Array.isArray(farmersData) ? farmersData.length : 'unknown');
+        await AsyncStorage.setItem(`cachedFarmers_${userId}`, JSON.stringify(cacheData));
+        console.log('💾 [SCIENTIST] Datos de agricultores guardados en cache:', farmersData.length);
       } catch (error) {
-        console.log('❌ Error guardando farmers en cache:', error);
+        console.log('❌ [SCIENTIST] Error guardando farmers en cache:', error);
       }
     },
 
     // Cargar agricultores desde cache
     async loadCachedFarmers(forceRefresh = false) {
       try {
-        const cachedData = await AsyncStorage.getItem('cachedFarmers');
+        const userId = user?.id;
+        if (!userId) return [];
+
+        const cachedData = await AsyncStorage.getItem(`cachedFarmers_${userId}`);
 
         if (cachedData && !forceRefresh) {
-          const { data, timestamp, userId } = JSON.parse(cachedData);
-
-          const isCurrentUser = user && user.id === userId;
-          const isStale = Date.now() - timestamp > 300000; // 5 minutos
-
-          if (isCurrentUser && !isStale) {
-            console.log('📁 Agricultores cargados desde cache:', data.length);
-            return data;
+          const { data, expiresAt } = JSON.parse(cachedData);
+          
+          // Verificar si el cache expiró
+          if (Date.now() > expiresAt) {
+            console.log('⏰ [SCIENTIST] Cache de farmers expirado, eliminando...');
+            await AsyncStorage.removeItem(`cachedFarmers_${userId}`);
+            return [];
           }
+          
+          console.log('📁 [SCIENTIST] Agricultores cargados desde cache:', data.length);
+          return data;
         }
 
         // Si no hay cache o está desactualizado, cargar del servidor
-        if (isConnected && user?.id && !forceRefresh) {
-          const farmers = await getFarmersFromServer();
-          await this.cacheFarmersData(farmers);
+        if (isConnected && !forceRefresh) {
+          const farmers = await this.getFarmers(userId);
+          await this.cacheFarmersData(userId, farmers);
           return farmers;
         }
 
         return [];
       } catch (error) {
-        console.log('❌ Error cargando farmers desde cache:', error);
+        console.log('❌ [SCIENTIST] Error cargando farmers desde cache:', error);
         return [];
       }
     },
 
     // Guardar datos de cultivos en cache
-    async cacheCropsData(cropsData) {
+    async cacheCropsData(userId, cacheKey, cropsData) {
       try {
         const cacheData = {
           data: cropsData,
           timestamp: Date.now(),
-          userId: user?.id,
-          lastUpdated: new Date().toISOString()
+          userId: userId,
+          lastUpdated: new Date().toISOString(),
+          expiresAt: Date.now() + (2 * 60 * 1000) // 2 minutos de expiración
         };
-        await AsyncStorage.setItem('cachedCropsScientist', JSON.stringify(cacheData));
-        console.log('💾 Datos de cultivos guardados en cache:', Array.isArray(cropsData) ? cropsData.length : 'unknown');
+        await AsyncStorage.setItem(`cachedCrops_${userId}_${cacheKey}`, JSON.stringify(cacheData));
+        console.log('💾 [SCIENTIST] Datos de cultivos guardados en cache:', cropsData.length);
       } catch (error) {
-        console.log('❌ Error guardando cultivos en cache:', error);
+        console.log('❌ [SCIENTIST] Error guardando cultivos en cache:', error);
       }
     },
 
     // Cargar cultivos desde cache
+    async loadCachedCrops(userId, cacheKey) {
+      try {
+        const cachedData = await AsyncStorage.getItem(`cachedCrops_${userId}_${cacheKey}`);
+        
+        if (cachedData) {
+          const { data, expiresAt } = JSON.parse(cachedData);
+          
+          // Verificar si el cache expiró
+          if (Date.now() > expiresAt) {
+            console.log('⏰ [SCIENTIST] Cache de cultivos expirado, eliminando...');
+            await AsyncStorage.removeItem(`cachedCrops_${userId}_${cacheKey}`);
+            return [];
+          }
+          
+          return data;
+        }
+        
+        return [];
+      } catch (error) {
+        console.log('❌ [SCIENTIST] Error cargando cultivos desde cache:', error);
+        return [];
+      }
+    },
+
+    // Cargar cultivos desde cache (versión anterior para compatibilidad)
     async loadCachedCropsScientist(forceRefresh = false) {
       try {
         const cachedData = await AsyncStorage.getItem('cachedCropsScientist');
@@ -866,6 +1050,158 @@ export const SyncProvider = ({ children }) => {
     }
   };
 
+  /* ---------------- NUEVAS FUNCIONES PARA FARMER SERVICE ---------------- */
+
+  // 🔥 NUEVAS FUNCIONES PARA FARMER SERVICE
+  const farmerService = {
+    // ✅ Validar y limpiar cache contra el servidor
+    async validateAndCleanCache(userId) {
+      try {
+        console.log('🧹 [FARMER] Validando cache contra servidor...');
+        
+        const isConnected = await checkConnection();
+        if (!isConnected) {
+          console.log('📴 [FARMER] Sin conexión, omitiendo validación');
+          return;
+        }
+
+        // Obtener datos del servidor
+        const serverCrops = await this.getCrops(userId);
+        const serverCropIds = new Set(serverCrops.map(c => c._id));
+
+        // Limpiar cache de cultivos
+        const cachedCrops = await this.loadCachedCrops(userId);
+        const validCrops = cachedCrops.filter(c => serverCropIds.has(c._id));
+        
+        if (validCrops.length !== cachedCrops.length) {
+          console.log(`🗑️ [FARMER] Eliminando ${cachedCrops.length - validCrops.length} cultivos del cache`);
+          await this.cacheCropsData(userId, validCrops);
+        }
+
+        console.log('✅ [FARMER] Validación completada');
+        
+      } catch (error) {
+        console.log('❌ [FARMER] Error en validación:', error);
+      }
+    },
+
+    // ✅ Obtener cultivos con cache
+    async getCropsWithCache(userId, forceRefresh = false) {
+      try {
+        const isConnected = await checkConnection();
+        
+        // Si hay conexión, siempre validar cache
+        if (isConnected) {
+          console.log('🔄 [FARMER] Conexión disponible, obteniendo datos frescos...');
+          const crops = await this.getCrops(userId);
+          
+          // Guardar en cache
+          await this.cacheCropsData(userId, crops);
+          
+          return crops;
+        } else {
+          // Sin conexión, usar cache
+          console.log('📴 [FARMER] Sin conexión, usando cache');
+          const cachedCrops = await this.loadCachedCrops(userId);
+          return cachedCrops;
+        }
+      } catch (error) {
+        console.log('❌ [FARMER] Error en getCropsWithCache:', error);
+        
+        // Fallback a cache
+        const cachedCrops = await this.loadCachedCrops(userId);
+        return cachedCrops;
+      }
+    },
+
+    // ✅ Forzar refresh completo
+    async forceRefreshAllData(userId) {
+      try {
+        console.log('🔄 [FARMER] Forzando refresh completo de datos...');
+        
+        // Limpiar cache existente
+        await this.clearAllUserCache(userId);
+        
+        // Obtener datos frescos del servidor
+        const crops = await this.getCrops(userId);
+        await this.cacheCropsData(userId, crops);
+        
+        console.log('✅ [FARMER] Refresh completo finalizado');
+        return { success: true, crops: crops.length };
+        
+      } catch (error) {
+        console.log('❌ [FARMER] Error en refresh completo:', error);
+        throw error;
+      }
+    },
+
+    // ✅ Limpiar todo el cache de un usuario
+    async clearAllUserCache(userId) {
+      try {
+        console.log('🧹 [FARMER] Limpiando todo el cache del usuario...');
+        
+        const allKeys = await AsyncStorage.getAllKeys();
+        const userKeys = allKeys.filter(key => 
+          key.includes(`cachedCrops_${userId}`)
+        );
+
+        await AsyncStorage.multiRemove(userKeys);
+        
+        console.log(`✅ [FARMER] ${userKeys.length} entradas eliminadas del cache`);
+        
+      } catch (error) {
+        console.log('❌ [FARMER] Error limpiando cache:', error);
+      }
+    },
+
+    // ✅ Guardar datos de cultivos en cache
+    async cacheCropsData(userId, cropsData) {
+      try {
+        const cacheData = {
+          data: cropsData,
+          timestamp: Date.now(),
+          userId: userId,
+          lastUpdated: new Date().toISOString(),
+          expiresAt: Date.now() + (2 * 60 * 1000) // 2 minutos de expiración
+        };
+        await AsyncStorage.setItem(`cachedCrops_${userId}`, JSON.stringify(cacheData));
+        console.log('💾 [FARMER] Cultivos guardados en cache:', cropsData.length);
+      } catch (error) {
+        console.log('❌ [FARMER] Error guardando cultivos en cache:', error);
+      }
+    },
+
+    // ✅ Cargar cultivos desde cache
+    async loadCachedCrops(userId) {
+      try {
+        const cachedData = await AsyncStorage.getItem(`cachedCrops_${userId}`);
+        
+        if (cachedData) {
+          const { data, expiresAt } = JSON.parse(cachedData);
+          
+          // Verificar si el cache expiró
+          if (Date.now() > expiresAt) {
+            console.log('⏰ [FARMER] Cache de cultivos expirado, eliminando...');
+            await AsyncStorage.removeItem(`cachedCrops_${userId}`);
+            return [];
+          }
+          
+          return data;
+        }
+        
+        return [];
+      } catch (error) {
+        console.log('❌ [FARMER] Error cargando cultivos desde cache:', error);
+        return [];
+      }
+    },
+
+    // ✅ Función auxiliar para obtener cultivos del servidor
+    async getCrops(userId) {
+      return await getUserCrops(false);
+    }
+  };
+
   /* -------------------- VALUE DEL CONTEXTO ----------------------- */
 
   const value = {
@@ -880,7 +1216,7 @@ export const SyncProvider = ({ children }) => {
     API_BASE_URL,
     cachedCrops,
 
-    // Funciones - (incluye loadUser)
+    // Funciones principales
     loadUser,
     saveUser,
     logout,
@@ -901,8 +1237,38 @@ export const SyncProvider = ({ children }) => {
     updateLastSync,
     loadLastSync,
 
-    // Nuevas funciones para scientist
-    scientistService,
+    // ✅ Nueva función de validación de cache
+    validateCacheWithServer,
+
+    // Servicios para scientist
+    scientistService: {
+      ...scientistService,
+      validateAndCleanCache: scientistService.validateAndCleanCache,
+      clearAllUserCache: scientistService.clearAllUserCache,
+      forceRefreshAllData: scientistService.forceRefreshAllData
+    },
+
+    // ✅ NUEVO: Servicios para farmer
+   farmerService: {
+  validateAndCleanCache: farmerService.validateAndCleanCache,
+  getCropsWithCache: farmerService.getCropsWithCache,
+  forceRefreshAllData: farmerService.forceRefreshAllData,
+  clearAllUserCache: farmerService.clearAllUserCache,
+  cacheCropsData: farmerService.cacheCropsData,
+  loadCachedCrops: farmerService.loadCachedCrops,
+  getCrops: farmerService.getCrops,
+  getCropDetails: farmerService.getCropDetails,
+  getRecommendations: farmerService.getRecommendations,
+  getSensorData: farmerService.getSensorData,
+  getStats: farmerService.getStats,
+  sendSensorData: farmerService.sendSensorData,
+  getAllOfflineData: farmerService.getAllOfflineData,
+  cacheRecommendations: farmerService.cacheRecommendations,
+  getCachedRecommendations: farmerService.getCachedRecommendations,
+  formatDate: farmerService.formatDate,
+  getDaysFromDate: farmerService.getDaysFromDate
+},
+    // Funciones individuales para compatibilidad
     loadCachedFarmers: scientistService.loadCachedFarmers,
     cacheFarmersData: scientistService.cacheFarmersData,
     loadCachedCropsScientist: scientistService.loadCachedCropsScientist,

@@ -1,4 +1,4 @@
-// app/scientist/reports.js - VERSIÓN CON GUARDADO LOCAL PARA MODO OFFLINE
+// app/scientist/reports.js - VERSIÓN FINAL CON VALIDACIÓN DE CACHE
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   View, Text, ScrollView, StyleSheet, Alert, Dimensions,
@@ -307,7 +307,7 @@ export default function Reports() {
   const [lastUpdate, setLastUpdate] = useState(null);
   const [connectionError, setConnectionError] = useState(false);
   
-  const { isConnected, unsyncedCount, user } = useSync();
+  const { isConnected, user, validateCacheWithServer } = useSync();
 
   // ✅ NUEVA FUNCIÓN: Guardar datos en cache local
   const saveToLocalCache = useCallback(async (rankingData, biofertilizerData) => {
@@ -389,7 +389,7 @@ export default function Reports() {
     }
   }, []);
 
-  // ✅ FUNCIÓN MEJORADA: Cargar estadísticas con soporte offline
+  // ✅ FUNCIÓN MEJORADA: Cargar estadísticas con validación de cache
   const loadGlobalStats = useCallback(async (forceRefresh = false) => {
     try {
       setLoading(true);
@@ -404,7 +404,12 @@ export default function Reports() {
         return;
       }
       
-      // ✅ ESTRATEGIA: Primero intentar cache si no se fuerza refresh
+      // ✅ Si hay conexión, validar cache primero
+      if (isConnected && !forceRefresh) {
+        await validateCacheWithServer();
+      }
+      
+      // ✅ Intentar cache primero si no se fuerza refresh
       if (!forceRefresh) {
         const cacheLoaded = await loadFromLocalCache();
         if (cacheLoaded) {
@@ -424,7 +429,8 @@ export default function Reports() {
             return;
           }
           
-          const farmers = await scientistService.getFarmers(user.id);
+          // Usar la nueva función con validación
+          const farmers = await scientistService.getFarmersWithCache(user.id, true);
 
           if (!farmers || farmers.length === 0) {
             setRankingData([]);
@@ -474,7 +480,6 @@ export default function Reports() {
           // ✅ Fallback a cache si hay error de servidor
           const cacheLoaded = await loadFromLocalCache();
           if (!cacheLoaded) {
-            // Si no hay cache, mostrar datos vacíos
             setRankingData([]);
             setBiofertilizerData([]);
           }
@@ -503,13 +508,38 @@ export default function Reports() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user, isConnected, loadFromLocalCache, saveToLocalCache]);
+  }, [user, isConnected, loadFromLocalCache, saveToLocalCache, validateCacheWithServer]);
+
+  // ✅ NUEVA FUNCIÓN: Limpiar cache manualmente
+  const handleClearCache = useCallback(async () => {
+    Alert.alert(
+      'Limpiar Cache',
+      '¿Estás seguro de que quieres limpiar todo el cache local de reportes?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Limpiar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await clearLocalCache();
+              Alert.alert('Éxito', 'Cache de reportes limpiado correctamente');
+              // Recargar datos desde servidor
+              loadGlobalStats(true);
+            } catch (error) {
+              Alert.alert('Error', 'No se pudo limpiar el cache');
+            }
+          },
+        },
+      ]
+    );
+  }, [clearLocalCache, loadGlobalStats]);
 
   // Procesar datos de agricultores
   const processFarmersData = useCallback(async (farmers, userId) => {
     const rankingPromises = farmers.map(async (farmer) => {
       try {
-        const crops = await scientistService.getFarmerCrops(userId, farmer._id || farmer.id);
+        const crops = await scientistService.getFarmerCropsWithCache(userId, farmer._id || farmer.id, false);
         return {
           id: farmer._id || farmer.id,
           nombre: farmer.name || farmer.nombre,
@@ -548,16 +578,27 @@ export default function Reports() {
     loadGlobalStats();
   }, [loadGlobalStats]);
 
+  // ✅ MEJORADO: onRefresh con limpieza de cache
   const onRefresh = useCallback(async () => {
     if (!isConnected) {
       Alert.alert('Sin conexión', 'No puedes actualizar los datos sin conexión a internet');
       setRefreshing(false);
       return;
     }
+    
     setRefreshing(true);
     setConnectionError(false);
-    await loadGlobalStats(true); // Forzar refresh desde servidor
-  }, [loadGlobalStats, isConnected]);
+    
+    try {
+      // Forzar refresh completo
+      await scientistService.forceRefreshAllData(user.id);
+      await loadGlobalStats(true);
+    } catch (error) {
+      console.log('❌ Error en refresh:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadGlobalStats, isConnected, user.id]);
 
   const HeaderSection = useMemo(() => (
     <View style={styles.header}>
@@ -566,12 +607,34 @@ export default function Reports() {
         {connectionError ? "Error de conexión - Modo offline" :
          isConnected ? "Datos sincronizados" : "Modo offline"}
       </Text>
+      
+      {/* ✅ NUEVO: Información de fuente de datos */}
+      <View style={styles.dataSourceInfo}>
+        <Text style={styles.dataSourceText}>
+          Fuente: {dataSource === 'server' ? '🔄 Servidor' : '💾 Cache local'}
+        </Text>
+        {lastUpdate && (
+          <Text style={styles.lastUpdateText}>
+            Actualizado: {lastUpdate.toLocaleTimeString('es-MX')}
+          </Text>
+        )}
+      </View>
     </View>
-  ), [isConnected, connectionError]);
+  ), [isConnected, connectionError, dataSource, lastUpdate]);
 
   const StatsSection = useMemo(() => (
     <View style={styles.statsSection}>
-      <Text style={styles.sectionTitle}>📈 Resumen General</Text>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>📈 Resumen General</Text>
+        
+        {/* ✅ NUEVO: Botón para limpiar cache */}
+        <TouchableOpacity 
+          style={styles.clearCacheButton}
+          onPress={handleClearCache}
+        >
+          <Text style={styles.clearCacheText}>🧹 Limpiar</Text>
+        </TouchableOpacity>
+      </View>
       
       <View style={styles.statsGrid}>
         <StatCard 
@@ -591,7 +654,7 @@ export default function Reports() {
         />
       </View>
     </View>
-  ), [rankingData, biofertilizerData]);
+  ), [rankingData, biofertilizerData, handleClearCache]);
 
   const ChartsSection = useMemo(() => (
     <View style={styles.chartsSection}>
@@ -615,9 +678,10 @@ export default function Reports() {
         <Text style={styles.helpTitle}>💡 Información del Reporte</Text>
         <View style={styles.helpList}>
           <HelpItem text="📊 Este reporte resume la actividad reciente y el rendimiento de los agricultores y sus cultivos" />
-           <HelpItem text="📶 Si no hay internet, verás la última información guardada en tu dispositivo; los datos se sincronizarán cuando vuelvas a estar conectado" />
-            <HelpItem text="⚙️ Los datos se actualizan automáticamente cuando hay conexión, reflejando información en tiempo real" />
-             <HelpItem text="📈 Las gráficas te ayudan a comparar el desempeño entre agricultores y detectar áreas de mejora" />
+          <HelpItem text="📶 Si no hay internet, verás la última información guardada en tu dispositivo; los datos se sincronizarán cuando vuelvas a estar conectado" />
+          <HelpItem text="⚙️ Los datos se actualizan automáticamente cuando hay conexión, reflejando información en tiempo real" />
+          <HelpItem text="📈 Las gráficas te ayudan a comparar el desempeño entre agricultores y detectar áreas de mejora" />
+          <HelpItem text="💾 Usa el botón 'Limpiar' para forzar una actualización completa desde el servidor" />
         </View>
       </View>
     </View>
@@ -724,6 +788,23 @@ const styles = StyleSheet.create({
     color: 'white',
     textAlign: 'center',
     opacity: 0.9,
+    marginBottom: 8,
+  },
+  dataSourceInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  dataSourceText: {
+    fontSize: 12,
+    color: 'white',
+    opacity: 0.8,
+  },
+  lastUpdateText: {
+    fontSize: 12,
+    color: 'white',
+    opacity: 0.8,
   },
   // ✅ NUEVOS ESTILOS PARA BOTÓN DE REINTENTO
   retrySection: {
@@ -740,9 +821,25 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
-  // ... (el resto de los estilos se mantienen igual)
   statsSection: {
     marginBottom: 16,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  clearCacheButton: {
+    backgroundColor: '#ff9800',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  clearCacheText: {
+    fontSize: 12,
+    color: 'white',
+    fontWeight: '600',
   },
   chartsSection: {
     marginBottom: 16,
@@ -751,7 +848,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 12,
   },
   statsGrid: {
     flexDirection: 'row',

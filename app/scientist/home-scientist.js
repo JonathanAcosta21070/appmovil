@@ -1,4 +1,4 @@
-// app/scientist/home-scientist.js - VERSIÓN FINAL CON CACHE OFFLINE COMPLETO
+// app/scientist/home-scientist.js - VERSIÓN ACTUALIZADA CON VALIDACIÓN DE CACHE
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, RefreshControl } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
@@ -22,10 +22,11 @@ export default function HomeScientist() {
   const { 
     isConnected, 
     isSyncing, 
-    user
+    user,
+    validateCacheWithServer // ✅ Nuevo del context
   } = useSync();
 
-  // Cargar datos con soporte offline MEJORADO
+  // ✅ MEJORAR: loadData con validación automática
   const loadData = useCallback(async (forceRefresh = false) => {
     try {
       setIsLoading(true);
@@ -33,24 +34,24 @@ export default function HomeScientist() {
       let farmersData = [];
       let dataSourceType = 'server';
       
-      // Usar las nuevas funciones con cache
-      if (isConnected && !forceRefresh) {
-        // Cargar desde servidor con cache automático
-        console.log('🔄 Cargando datos desde servidor con cache...');
+      // Si hay conexión, siempre obtener datos frescos y validar cache
+      if (isConnected) {
+        console.log('🔄 Cargando datos desde servidor...');
+        
+        // Validar cache antes de cargar
+        if (!forceRefresh) {
+          await validateCacheWithServer();
+        }
+        
+        // Obtener datos frescos (ya incluye cache automático)
         farmersData = await scientistService.getFarmersWithCache(user.id, forceRefresh);
         dataSourceType = 'server';
-      } else {
-        // Cargar desde cache
-        console.log('📁 Cargando datos desde cache...');
-        farmersData = await scientistService.getFarmersWithCache(user.id, false);
-        dataSourceType = 'cache';
         
-        // Si no hay cache pero hay conexión, forzar carga del servidor
-        if (farmersData.length === 0 && isConnected) {
-          console.log('🔄 No hay cache, cargando desde servidor...');
-          farmersData = await scientistService.getFarmersWithCache(user.id, true);
-          dataSourceType = 'server';
-        }
+      } else {
+        // Sin conexión, usar cache
+        console.log('📴 Sin conexión, cargando desde cache...');
+        farmersData = await scientistService.loadCachedFarmers(user.id);
+        dataSourceType = 'cache';
       }
 
       setAssignedFarmers(farmersData || []);
@@ -74,10 +75,10 @@ export default function HomeScientist() {
       
       // Intentar cargar desde cache como fallback
       try {
-        const cachedData = await scientistService.getAllOfflineData(user.id);
-        setAssignedFarmers(cachedData.farmers);
+        const cachedData = await scientistService.loadCachedFarmers(user.id);
+        setAssignedFarmers(cachedData);
         setDataSource('cache');
-        await calculateStats(cachedData.farmers, 'cache');
+        await calculateStats(cachedData, 'cache');
       } catch (cacheError) {
         console.log('❌ Error cargando desde cache:', cacheError);
         setAssignedFarmers([]);
@@ -90,7 +91,7 @@ export default function HomeScientist() {
       setIsLoading(false);
       setRefreshing(false);
     }
-  }, [user?.id, isConnected]);
+  }, [user?.id, isConnected, validateCacheWithServer]);
 
   // Calcular estadísticas MEJORADO
   const calculateStats = useCallback(async (farmersData, source) => {
@@ -158,16 +159,28 @@ export default function HomeScientist() {
     }, [loadData, user?.id])
   );
 
+  // ✅ MEJORAR: onRefresh con limpieza de cache
   const onRefresh = useCallback(async () => {
     if (!isConnected) {
       Alert.alert('Sin conexión', 'No puedes actualizar los datos sin conexión a internet');
       return;
     }
+    
     setRefreshing(true);
-    await loadData(true); // Forzar refresh
-  }, [loadData, isConnected]);
+    
+    try {
+      // Forzar refresh completo (limpia cache y obtiene datos frescos)
+      await scientistService.forceRefreshAllData(user.id);
+      await loadData(true);
+    } catch (error) {
+      console.log('❌ Error en refresh:', error);
+      Alert.alert('Error', 'No se pudieron actualizar los datos');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadData, isConnected, user.id]);
 
-  // Cerrar sesión
+  // ✅ MEJORAR: handleLogout con limpieza de cache
   const handleLogout = useCallback(async () => {
     Alert.alert(
       'Cerrar Sesión',
@@ -179,9 +192,9 @@ export default function HomeScientist() {
           style: 'destructive',
           onPress: async () => {
             try {
-              // Limpiar cache al cerrar sesión
+              // Limpiar todo el cache al cerrar sesión
               if (user?.id) {
-                await scientistService.clearOldCache(user.id);
+                await scientistService.clearAllUserCache(user.id);
               }
               await AsyncStorage.multiRemove(['user', 'localActions']);
               router.replace('/');
@@ -239,6 +252,12 @@ export default function HomeScientist() {
           </Text>
         </View>
         
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Fuente de datos:</Text>
+          <Text style={[styles.detailValue, { color: dataSource === 'server' ? '#4caf50' : '#ff9800' }]}>
+            {dataSource === 'server' ? '🔄 Servidor' : '📱 Cache local'}
+          </Text>
+        </View>
       </View>
 
       {/* Botón de cerrar sesión */}
@@ -333,6 +352,11 @@ const FarmersSection = React.memo(({ farmers, isLoading, dataSource }) => (
   <View style={styles.farmersSection}>
     <View style={styles.sectionHeader}>
       <Text style={styles.sectionTitle}>👥 Agricultores Asignados</Text>
+      <View style={[styles.dataSourceBadge, { backgroundColor: dataSource === 'server' ? '#e8f5e8' : '#fff3e0' }]}>
+        <Text style={{ color: dataSource === 'server' ? '#4caf50' : '#ff9800', fontSize: 10, fontWeight: 'bold' }}>
+          {dataSource === 'server' ? '🔄 LIVE' : '📱 CACHE'}
+        </Text>
+      </View>
     </View>
     
     {isLoading ? (
@@ -532,6 +556,11 @@ const styles = StyleSheet.create({
     minWidth: 80,
     alignItems: 'center',
   },
+  statusText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
   cardDetails: {
     marginBottom: 16,
   },
@@ -549,20 +578,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
     fontWeight: '600',
-  },
-  offlineNotice: {
-    backgroundColor: '#e3f2fd',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#2196f3',
-  },
-  offlineNoticeText: {
-    fontSize: 12,
-    color: '#1565c0',
-    lineHeight: 16,
-    textAlign: 'center',
   },
   logoutButton: {
     backgroundColor: '#dc2626',
@@ -590,12 +605,9 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   dataSourceBadge: {
-    fontSize: 10,
-    fontWeight: '600',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
-    color: '#333',
   },
   statsGrid: {
     flexDirection: 'row',
