@@ -1,4 +1,5 @@
-// app/farmer/sensor-connection.js - CON HISTORIAL SIMPLIFICADO
+// app/farmer/sensor-connection.js - CON HISTORIAL SIMPLIFICADO Y DEBUGS
+// (EL CÓDIGO SE MANTIENE IGUAL, SOLO CAMBIA EL CONTEXTO DETRÁS)
 import React, { useCallback, useMemo } from "react";
 import { 
   View, 
@@ -18,16 +19,30 @@ const HUMIDITY_STATUS = {
   high: { level: "Alta", color: "#2196f3", icon: "💧", advice: "Suelo húmedo" }
 };
 
-
-
-
 const HUMIDITY_LEVELS = [
   { color: '#f44336', text: 'Baja (0-30%): Necesita riego urgente' },
   { color: '#4caf50', text: 'Óptima (30-60%): Condiciones ideales' },
   { color: '#2196f3', text: 'Alta (60-100%): Suelo húmedo' }
 ];
 
+// Debug helper function
+const debugLog = (component, message, data = null) => {
+  const timestamp = new Date().toLocaleTimeString('es-MX', { 
+    hour: '2-digit', 
+    minute: '2-digit',
+    second: '2-digit',
+    fractionalSecondDigits: 3
+  });
+  if (data) {
+    console.log(`[${timestamp}] [${component}] ${message}`, data);
+  } else {
+    console.log(`[${timestamp}] [${component}] ${message}`);
+  }
+};
+
 export default function SensorConnectionScreen() {
+  debugLog("SensorConnectionScreen", "Componente montado/iniciado");
+  
   const {
     humidity,
     status,
@@ -41,11 +56,26 @@ export default function SensorConnectionScreen() {
     connectToDevice,
     scanForDevices,
     stopScan,
-    humidityHistory, // ✅ Nuevo: historial de humedad
+    humidityHistory,
   } = useBle();
+
+  // Debug de props principales
+  React.useEffect(() => {
+    debugLog("SensorConnectionScreen", "Estado actual del contexto", {
+      humidity,
+      status,
+      isConnected,
+      deviceName,
+      connectionError,
+      isScanning,
+      devicesCount: devicesList?.length || 0,
+      historyCount: humidityHistory?.length || 0
+    });
+  }, [humidity, status, isConnected, deviceName, connectionError, isScanning, devicesList, humidityHistory]);
 
   // Memoizar valores computados
   const humidityStatus = useMemo(() => {
+    debugLog("humidityStatus", "Calculando estado de humedad", { humidity });
     if (humidity === null) return HUMIDITY_STATUS.noData;
     if (humidity < 30) return HUMIDITY_STATUS.low;
     if (humidity < 60) return HUMIDITY_STATUS.optimal;
@@ -53,19 +83,26 @@ export default function SensorConnectionScreen() {
   }, [humidity]);
 
   const formattedTime = useMemo(() => {
-    if (!lastUpdate) return '--:--:--';
-    return lastUpdate.toLocaleTimeString('es-MX');
+    const time = lastUpdate ? lastUpdate.toLocaleTimeString('es-MX') : '--:--:--';
+    debugLog("formattedTime", "Formateando hora", { lastUpdate, formatted: time });
+    return time;
   }, [lastUpdate]);
 
   // ✅ NUEVO: Formatear historial de humedad - SIMPLIFICADO
   const formattedHistory = useMemo(() => {
+    debugLog("formattedHistory", "Procesando historial", { 
+      rawHistory: humidityHistory,
+      historyLength: humidityHistory?.length 
+    });
+    
     if (!humidityHistory || humidityHistory.length === 0) {
+      debugLog("formattedHistory", "Historial vacío o no disponible");
       return [];
     }
     
     // Tomar los últimos 5 datos y formatearlos
-    return humidityHistory
-      .slice(-5) // Últimos 5 elementos
+    const history = humidityHistory
+      .slice(-5)
       .map((item) => ({
         ...item,
         time: item.timestamp ? new Date(item.timestamp).toLocaleTimeString('es-MX', { 
@@ -74,163 +111,223 @@ export default function SensorConnectionScreen() {
           second: '2-digit'
         }) : '--:--:--'
       }))
-      .reverse(); // Mostrar del más reciente al más antiguo
+      .reverse();
+    
+    debugLog("formattedHistory", "Historial formateado", { history });
+    return history;
   }, [humidityHistory]);
 
   // Funciones memoizadas
   const handleRefresh = useCallback(() => {
+    debugLog("handleRefresh", "Pull-to-refresh ejecutado", { isConnected, isScanning });
     if (!isConnected && !isScanning) {
+      debugLog("handleRefresh", "Iniciando escaneo desde refresh");
       scanForDevices();
+    } else {
+      debugLog("handleRefresh", "Refresh ignorado - ya conectado o escaneando");
     }
   }, [isConnected, isScanning, scanForDevices]);
 
   const handleDeviceConnect = useCallback((device) => {
+    debugLog("handleDeviceConnect", "Conectando a dispositivo", { 
+      deviceId: device.id, 
+      deviceName: device.name 
+    });
     connectToDevice(device.device);
   }, [connectToDevice]);
 
+  const handleDisconnect = useCallback(() => {
+    debugLog("handleDisconnect", "Desconectando dispositivo");
+    disconnectDevice();
+  }, [disconnectDevice]);
+
+  const handleScan = useCallback(() => {
+    debugLog("handleScan", "Iniciando escaneo manual");
+    scanForDevices();
+  }, [scanForDevices]);
+
+  const handleStopScan = useCallback(() => {
+    debugLog("handleStopScan", "Deteniendo escaneo");
+    stopScan();
+  }, [stopScan]);
+
   // ✅ NUEVO: Renderizar historial de humedad - SIMPLIFICADO
-  const renderHumidityHistory = useCallback(() => (
-    <View style={styles.historyCard}>
-      <Text style={styles.historyTitle}>📈 Historial de Humedad</Text>
-      
-      {formattedHistory.length > 0 ? (
-        <View style={styles.historyList}>
-          {formattedHistory.map((item, index) => (
-            <View key={index} style={styles.historyItem}>
-              <View style={styles.historyData}>
-                <Text style={styles.historyValue}>{item.value}%</Text>
-                <Text style={styles.historyTime}>{item.time}</Text>
+  const renderHumidityHistory = useCallback(() => {
+    debugLog("renderHumidityHistory", "Renderizando historial", { 
+      hasHistory: formattedHistory.length > 0 
+    });
+    
+    return (
+      <View style={styles.historyCard}>
+        <Text style={styles.historyTitle}>📈 Historial de Humedad</Text>
+        
+        {formattedHistory.length > 0 ? (
+          <View style={styles.historyList}>
+            {formattedHistory.map((item, index) => (
+              <View key={index} style={styles.historyItem}>
+                <View style={styles.historyData}>
+                  <Text style={styles.historyValue}>{item.value}%</Text>
+                  <Text style={styles.historyTime}>{item.time}</Text>
+                </View>
+                <View style={[
+                  styles.historyStatus,
+                  { 
+                    backgroundColor: 
+                      item.value < 30 ? '#f44336' : 
+                      item.value < 60 ? '#4caf50' : '#2196f3'
+                  }
+                ]}>
+                  <Text style={styles.historyStatusText}>
+                    {item.value < 30 ? 'Baja' : item.value < 60 ? 'Óptima' : 'Alta'}
+                  </Text>
+                </View>
               </View>
-              <View style={[
-                styles.historyStatus,
-                { 
-                  backgroundColor: 
-                    item.value < 30 ? '#f44336' : 
-                    item.value < 60 ? '#4caf50' : '#2196f3'
-                }
-              ]}>
-                <Text style={styles.historyStatusText}>
-                  {item.value < 30 ? 'Baja' : item.value < 60 ? 'Óptima' : 'Alta'}
-                </Text>
-              </View>
+            ))}
+          </View>
+        ) : (
+          <View style={styles.emptyHistory}>
+            <Text style={styles.emptyHistoryText}>📊</Text>
+            <Text style={styles.emptyHistoryText}>No hay datos históricos</Text>
+            <Text style={styles.emptyHistorySubtext}>
+              {isConnected ? 'Los datos aparecerán aquí' : 'Conecta el sensor para ver el historial'}
+            </Text>
+          </View>
+        )}
+      </View>
+    );
+  }, [formattedHistory, isConnected]);
+
+  // Renderizado de componentes
+  const renderHumidityBar = useCallback(() => {
+    debugLog("renderHumidityBar", "Renderizando barra de humedad", { humidity });
+    return (
+      <View style={styles.humidityBarContainer}>
+        <View style={styles.humidityBar}>
+          <View 
+            style={[
+              styles.humidityFill,
+              { 
+                width: `${humidity !== null ? Math.min(humidity, 100) : 0}%`,
+                backgroundColor: humidityStatus.color
+              }
+            ]} 
+          />
+        </View>
+        <View style={styles.humidityLabels}>
+          <Text style={styles.humidityLabel}>0%</Text>
+          <Text style={styles.humidityLabel}>50%</Text>
+          <Text style={styles.humidityLabel}>100%</Text>
+        </View>
+      </View>
+    );
+  }, [humidity, humidityStatus.color]);
+
+  const renderControls = useCallback(() => {
+    debugLog("renderControls", "Renderizando controles", { isConnected, isScanning });
+    return (
+      <View style={styles.controlsContainer}>
+        {isConnected ? (
+          <TouchableOpacity 
+            style={[styles.controlButton, styles.disconnectButton]}
+            onPress={handleDisconnect}
+          >
+            <Text style={styles.controlButtonText}>🔴 Desconectar</Text>
+          </TouchableOpacity>
+        ) : isScanning ? (
+          <TouchableOpacity 
+            style={[styles.controlButton, styles.stopButton]}
+            onPress={handleStopScan}
+          >
+            <Text style={styles.controlButtonText}>⏹️ Detener Escaneo</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity 
+            style={[styles.controlButton, styles.connectButton]}
+            onPress={handleScan}
+          >
+            <Text style={styles.controlButtonText}>🔍 Buscar Sensores</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  }, [isConnected, isScanning, handleDisconnect, handleStopScan, handleScan]);
+
+  const renderDevicesList = useCallback(() => {
+    debugLog("renderDevicesList", "Renderizando lista de dispositivos", { 
+      devicesCount: devicesList.length,
+      isConnected 
+    });
+    
+    return (
+      devicesList.length > 0 && !isConnected && (
+        <View style={styles.devicesSection}>
+          <Text style={styles.sectionTitle}>📋 Sensores Disponibles</Text>
+          {devicesList.map((device) => (
+            <View key={device.id} style={styles.deviceCardContainer}>
+              <TouchableOpacity
+                style={styles.deviceCard}
+                onPress={() => handleDeviceConnect(device)}
+              >
+                <View style={styles.deviceHeader}>
+                  <View style={styles.deviceTitleContainer}>
+                    <Text style={styles.deviceIcon}>📱</Text>
+                    <View style={styles.deviceTitleText}>
+                      <Text style={styles.deviceName}>{device.name}</Text>
+                      <Text style={styles.deviceId}>ID: {device.id}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.connectText}>Conectar →</Text>
+                </View>
+              </TouchableOpacity>
             </View>
           ))}
         </View>
-      ) : (
-        <View style={styles.emptyHistory}>
-          <Text style={styles.emptyHistoryText}>📊</Text>
-          <Text style={styles.emptyHistoryText}>No hay datos históricos</Text>
-          <Text style={styles.emptyHistorySubtext}>
-            {isConnected ? 'Los datos aparecerán aquí' : 'Conecta el sensor para ver el historial'}
-          </Text>
+      )
+    );
+  }, [devicesList, isConnected, handleDeviceConnect]);
+
+  const renderHelpSection = useCallback(() => {
+    debugLog("renderHelpSection", "Renderizando sección de ayuda");
+    return (
+      <View style={styles.helpCard}>
+        <Text style={styles.helpTitle}>💡 Cómo usar</Text>
+        <View style={styles.helpList}>
+          {[
+            '1️⃣ Activa el Bluetooth en tu dispositivo antes de iniciar la búsqueda.',
+            '2️⃣ Presiona "Buscar Sensores" para encontrar dispositivos cercanos.',
+            '3️⃣ Una vez conectado, observa la humedad del suelo en tiempo real.',
+            '4️⃣ Mantén el sensor limpio y evita enterrarlo completamente en agua.',
+            '5️⃣ Usa "Desconectar" cuando termines para liberar la conexión BLE.',
+            '⚠️ Si no aparece el sensor, asegúrate de que esté encendido y cerca (menos de 5 m).',
+          ].map((text, index) => (
+            <View key={index} style={styles.helpItem}>
+              <Text style={styles.helpIcon}>•</Text>
+              <Text style={styles.helpText}>{text}</Text>
+            </View>
+          ))}
         </View>
-      )}
-    </View>
-  ), [formattedHistory, isConnected]);
-
-  // Renderizado de componentes (los demás se mantienen igual)
-  const renderHumidityBar = useCallback(() => (
-    <View style={styles.humidityBarContainer}>
-      <View style={styles.humidityBar}>
-        <View 
-          style={[
-            styles.humidityFill,
-            { 
-              width: `${humidity !== null ? Math.min(humidity, 100) : 0}%`,
-              backgroundColor: humidityStatus.color
-            }
-          ]} 
-        />
       </View>
-      <View style={styles.humidityLabels}>
-        <Text style={styles.humidityLabel}>0%</Text>
-        <Text style={styles.humidityLabel}>50%</Text>
-        <Text style={styles.humidityLabel}>100%</Text>
-      </View>
-    </View>
-  ), [humidity, humidityStatus.color]);
+    );
+  }, []);
 
-  const renderControls = useCallback(() => (
-    <View style={styles.controlsContainer}>
-      {isConnected ? (
-        <TouchableOpacity 
-          style={[styles.controlButton, styles.disconnectButton]}
-          onPress={disconnectDevice}
-        >
-          <Text style={styles.controlButtonText}>🔴 Desconectar</Text>
-        </TouchableOpacity>
-      ) : isScanning ? (
-        <TouchableOpacity 
-          style={[styles.controlButton, styles.stopButton]}
-          onPress={stopScan}
-        >
-          <Text style={styles.controlButtonText}>⏹️ Detener Escaneo</Text>
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity 
-          style={[styles.controlButton, styles.connectButton]}
-          onPress={scanForDevices}
-        >
-          <Text style={styles.controlButtonText}>🔍 Buscar Sensores</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  ), [isConnected, isScanning, disconnectDevice, stopScan, scanForDevices]);
-
-  const renderDevicesList = useCallback(() => (
-    devicesList.length > 0 && !isConnected && (
-      <View style={styles.devicesSection}>
-        <Text style={styles.sectionTitle}>📋 Sensores Disponibles</Text>
-        {devicesList.map((device) => (
-          <View key={device.id} style={styles.deviceCardContainer}>
-            <TouchableOpacity
-              style={styles.deviceCard}
-              onPress={() => handleDeviceConnect(device)}
-            >
-              <View style={styles.deviceHeader}>
-                <View style={styles.deviceTitleContainer}>
-                  <Text style={styles.deviceIcon}>📱</Text>
-                  <View style={styles.deviceTitleText}>
-                    <Text style={styles.deviceName}>{device.name}</Text>
-                    <Text style={styles.deviceId}>ID: {device.id}</Text>
-                  </View>
-                </View>
-                <Text style={styles.connectText}>Conectar →</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-        ))}
+  const renderHumidityLevels = useCallback(() => {
+    debugLog("renderHumidityLevels", "Renderizando niveles de humedad");
+    return (
+      <View style={styles.levelsCard}>
+        <Text style={styles.levelsTitle}>📊 Niveles de Humedad</Text>
+        <View style={styles.levelsList}>
+          {HUMIDITY_LEVELS.map((level, index) => (
+            <View key={index} style={styles.levelItem}>
+              <View style={[styles.levelColor, { backgroundColor: level.color }]} />
+              <Text style={styles.levelText}>{level.text}</Text>
+            </View>
+          ))}
+        </View>
       </View>
-    )
-  ), [devicesList, isConnected, handleDeviceConnect]);
+    );
+  }, []);
 
-  const renderHelpSection = useCallback(() => (
-    <View style={styles.helpCard}>
-      <Text style={styles.helpTitle}>💡 Cómo usar</Text>
-      <View style={styles.helpList}>
-        {HELP_ITEMS.map((item, index) => (
-          <View key={index} style={styles.helpItem}>
-            <Text style={styles.helpIcon}>{item.icon}</Text>
-            <Text style={styles.helpText}>{item.text}</Text>
-          </View>
-        ))}
-      </View>
-    </View>
-  ), []);
-
-  const renderHumidityLevels = useCallback(() => (
-    <View style={styles.levelsCard}>
-      <Text style={styles.levelsTitle}>📊 Niveles de Humedad</Text>
-      <View style={styles.levelsList}>
-        {HUMIDITY_LEVELS.map((level, index) => (
-          <View key={index} style={styles.levelItem}>
-            <View style={[styles.levelColor, { backgroundColor: level.color }]} />
-            <Text style={styles.levelText}>{level.text}</Text>
-          </View>
-        ))}
-      </View>
-    </View>
-  ), []);
+  debugLog("SensorConnectionScreen", "Renderizando componente completo");
 
   return (
     <ScrollView 
@@ -308,40 +405,21 @@ export default function SensorConnectionScreen() {
       {/* Lista de dispositivos */}
       {renderDevicesList()}
 
-      {/* ✅ NUEVO: Historial de humedad - AHORA DESPUÉS DE SENSORES DISPONIBLES */}
+      {/* ✅ NUEVO: Historial de humedad */}
       {renderHumidityHistory()}
 
       {/* Niveles de referencia */}
       {renderHumidityLevels()}
 
-            {/* Información adicional */}
-            <View style={styles.helpSection}>
-              <View style={styles.helpCard}>
-                <Text style={styles.helpTitle}>💡 Como usar</Text>
-                <View style={styles.helpList}>
-                  {[
-                  '1️⃣ Activa el Bluetooth en tu dispositivo antes de iniciar la búsqueda.',
-                  '2️⃣ Presiona "Buscar Sensores" para encontrar dispositivos cercanos.',
-                  '3️⃣ Una vez conectado, observa la humedad del suelo en tiempo real.' ,
-                  '4️⃣ Mantén el sensor limpio y evita enterrarlo completamente en agua.' ,
-                  '5️⃣ Usa "Desconectar" cuando termines para liberar la conexión BLE.' ,
-                  '⚠️ Si no aparece el sensor, asegúrate de que esté encendido y cerca (menos de 5 m).' ,
-                            ].map((text, index) => (
-                    <View key={index} style={styles.helpItem}>
-                      <Text style={styles.helpIcon}>•</Text>
-                      <Text style={styles.helpText}>{text}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            </View>
+      {/* Información adicional */}
+      {renderHelpSection()}
 
       <View style={styles.bottomSpacing} />
     </ScrollView>
   );
 }
 
-// Estilos actualizados con el nuevo componente de historial SIMPLIFICADO
+// Estilos (se mantienen igual)
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   contentContainer: { padding: 16, paddingBottom: 60 },
